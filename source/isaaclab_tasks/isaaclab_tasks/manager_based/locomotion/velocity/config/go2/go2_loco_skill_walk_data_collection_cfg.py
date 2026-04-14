@@ -149,10 +149,14 @@ class MySceneCfg(InteractiveSceneCfg):
         offset=RayCasterLidarCfg.OffsetCfg(pos=(0.28945, 0.0, -0.04682), rot=(0.13132, 0.0, 0.99134, 0.0)),
         max_distance=50.0,
         ray_alignment="base",
-        pattern_cfg=patterns.Mid360PatternCfg(csv_file_path="/home/gms/Projs/Mid360Csv/mid360.csv"),
+        pattern_cfg=patterns.Mid360PatternCfg(csv_file_path="/home/gms/Isaac/IsaacLab2.2/IsaacLab/User/ScanCSV/Mid360/mid360.csv"),
         dynamic_pattern=True,
         debug_vis=True,
         mesh_prim_paths=["/World/ground"],
+        data_box_clip=(3.2, 3.2, 3.2),
+        data_normalization=True,
+        data_collection=True,
+        data_save_path="/home/gms/Isaac/IsaacLab2.2/DataCollection",
     )
     gt_scanner = RayCasterBoxCfg(
         prim_path="{ENV_REGEX_NS}/Robot/base",
@@ -167,6 +171,7 @@ class MySceneCfg(InteractiveSceneCfg):
         box_vis=False,
         debug_vis=True,
         mesh_prim_paths=["/World/ground"],
+        data_normalization=True,
         data_collection=True,
         data_save_path="/home/gms/Isaac/IsaacLab2.2/DataCollection",
     )
@@ -723,6 +728,10 @@ class TerminationsCfg:
     base_contact = DoneTerm(
         func=mdp.illegal_contact,
         params={"sensor_cfg": SceneEntityCfg("contact_forces", body_names="base"), "threshold": 1.0},
+    )
+    bad_orientation = DoneTerm(
+        func=mdp.bad_orientation,
+        params={"limit_angle": math.pi*70.0/180.0},
     )
 
 

@@ -3,6 +3,7 @@ import sys
 import numpy as np
 from pathlib import Path
 import argparse
+import time
 
 try:
     import open3d as o3d
@@ -14,9 +15,12 @@ except ImportError:
 
 
 class DualPointCloudVisualizer:
-    def __init__(self, root_path_1, root_path_2=None):
+    def __init__(self, root_path_1, root_path_2=None, play_delya=0.1):
         self.root_path_1 = Path(root_path_1)
         self.root_path_2 = Path(root_path_2) if root_path_2 else None
+        
+        self.last_next_time = 0
+        self.playback_delay = play_delya  # 播放延迟（秒）
         
         self.pcd_files_1 = []
         self.pcd_files_2 = []
@@ -67,6 +71,20 @@ class DualPointCloudVisualizer:
             
         return pcd
 
+    def check_normalization(self, pcd, filename):
+        """检查点云是否在-0.5到0.5的归一化范围内"""
+        if not pcd.points:
+            return True
+            
+        points = np.asarray(pcd.points)
+        min_vals = points.min(axis=0)
+        max_vals = points.max(axis=0)
+        
+        if np.any(min_vals < -0.51) or np.any(max_vals > 0.51):
+            print(f"警告: 文件 {filename} 的点云未在[-0.5, 0.5]范围内 - X:[{min_vals[0]:.3f},{max_vals[0]:.3f}], Y:[{min_vals[1]:.3f},{max_vals[1]:.3f}], Z:[{min_vals[2]:.3f},{max_vals[2]:.3f}]")
+            return False
+        return True
+
     def visualize(self, start_idx=0, end_idx=None):
         max_len_1 = len(self.pcd_files_1)
         max_len_2 = len(self.pcd_files_2)
@@ -109,8 +127,9 @@ class DualPointCloudVisualizer:
                 if len(loaded_pcd.points) == 0:
                     return False
 
-                loaded_pcd = self.normalize_point_cloud(loaded_pcd)
-                loaded_pcd.paint_uniform_color([0.8, 0.8, 0.8])
+                if not self.check_normalization(loaded_pcd, file_path.name):
+                    loaded_pcd = self.normalize_point_cloud(loaded_pcd)
+                loaded_pcd.paint_uniform_color([0.2, 0.8, 0.2])
                 loaded_pcd.estimate_normals()
 
                 pcd_obj.points = loaded_pcd.points
@@ -131,6 +150,12 @@ class DualPointCloudVisualizer:
 
         def next_callback(vis):
             nonlocal current_idx, is_first_frame
+            
+            current_time = time.time()
+            if current_time - self.last_next_time < self.playback_delay:
+                return  # 如果时间间隔小于延迟，则不执行操作
+            
+            self.last_next_time = current_time  # 更新最后执行时间
             
             update_single_window(vis1, pcd1, self.pcd_files_1, current_idx)
             
@@ -223,7 +248,7 @@ if __name__ == "__main__":
         args = parser.parse_args()
         
         try:
-            visualizer = DualPointCloudVisualizer(args.root_path_1, args.root_path_2)
+            visualizer = DualPointCloudVisualizer(args.root_path_1, args.root_path_2, 0.05)
             visualizer.visualize(args.start_idx)
         except Exception as e:
             print(f"运行时错误: {e}")

@@ -28,7 +28,7 @@ IMAGE_STAIRS_TERRAIN_CFG = TerrainGeneratorCfg(
     sub_terrains={
         "stairs_blocks": terrain_gen.HfImageBasedTerrainCfg(
             proportion=1.0,
-            image_path="/home/gms/Isaac/IsaacLab2.2/TerrainPics/ConStru_terrain_1.png",
+            image_path="/home/gms/Isaac/IsaacLab2.2/IsaacLab/User/TerrainPics/ConStru_terrain_1.png",
             height_scale=0.01,
             color_mode="hsv",
             hsv_zero_point=180.0,
@@ -61,14 +61,14 @@ MULTI_LAYER_TERRAIN_CFG = TerrainGeneratorCfg(
             hsv_zero_point=180.0,
             layer_configs=[
                 terrain_gen.ImageHeightLayerCfg(
-                    image_path="/home/gms/Isaac/IsaacLab2.2/TerrainPics/layer1_N5.png",
+                    image_path="/home/gms/Isaac/IsaacLab2.2/IsaacLab/User/TerrainPics/layer1_N5.png",
                     height_scale=0.01,
                     blend_mode="add",
                     color_mode="hsv",
                     smoothing_sigma=0.0,
                 ),
                 terrain_gen.ImageHeightLayerCfg(
-                    image_path="/home/gms/Isaac/IsaacLab2.2/TerrainPics/layer2_N5.png",
+                    image_path="/home/gms/Isaac/IsaacLab2.2/IsaacLab/User/TerrainPics/layer2_N5.png",
                     height_scale=0.0075,
                     blend_mode="add",
                     color_mode="hsv",

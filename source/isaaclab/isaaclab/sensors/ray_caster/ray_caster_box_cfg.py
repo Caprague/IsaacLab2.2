@@ -125,6 +125,9 @@ class RayCasterBoxCfg(SensorBaseCfg):
     hits_visualizer_cfg: VisualizationMarkersCfg = RAY_CASTER_GREEN_MARKER_CFG.replace(prim_path="/Visuals/RayCasterBoxHits")
     """射线击中点可视化器配置."""
     
+    data_normalization: bool = False
+    """仅当时 data_box_clip 有效时可用，控制是否对包围盒裁剪后的数据进行归一化处理，范围 (-0.5, +0.5)"""
+    
     data_collection: bool = False
     """是否启用数据收集."""
 

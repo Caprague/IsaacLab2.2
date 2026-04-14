@@ -329,9 +329,37 @@ class RayCasterBox(SensorBase):
             ray_max_distances_w
         )
         
+        # 获取当前环境批次的命中数据
+        current_ray_hits_w = self._data.ray_hits_w[env_ids] # Shape: (len(env_ids), num_rays, 3) or similar
+        # 获取传感器在世界坐标系中的位姿
+        current_pos_w = self._data.pos_w[env_ids] # (N, 3) - N = len(env_ids)
+        current_quat_w = self._data.quat_w[env_ids] # (N, 4) - N = len(env_ids)
+        # 计算 offset 对应的世界位移
+        offset_pos = torch.tensor(list(self.cfg.offset.pos), device=self._device) # (3,)
+        B = current_ray_hits_w.shape[1]
+        offset_pos_w = quat_apply(current_quat_w.unsqueeze(1).expand(-1, B, -1), offset_pos.unsqueeze(0).unsqueeze(0).expand(len(env_ids), B, -1)) # (N, B, 3)
+        hits_in_root_frame = current_ray_hits_w - current_pos_w.unsqueeze(1) # (N, B, 3)
+        local_hits_before_yaw_rotation = hits_in_root_frame - offset_pos_w # (N, B, 3)
+        # 计算逆偏航旋转 (用于 "yaw" 模式)
+        quat_inv_full = math_utils.quat_inv(current_quat_w) # (N, 4) - 完整的逆旋转
+        quat_inv_full_expanded = quat_inv_full.unsqueeze(1).expand(-1, B, -1).reshape(-1, 4)
+        # 应用逆偏航旋转，将点转到传感器本体坐标系
+        local_hits_viewed = local_hits_before_yaw_rotation.view(-1, 3) # (N*B, 3)
+        local_hits_after_yaw_rotation = quat_apply_yaw(quat_inv_full_expanded, local_hits_viewed) # (N*B, 3)
+        local_hits = local_hits_after_yaw_rotation.view(local_hits_before_yaw_rotation.shape) # (N, B, 3)
+
+        # 归一化处理
+        if self.cfg.data_normalization:
+            clip_bounds = torch.tensor(self.cfg.pattern_cfg.size, dtype=local_hits.dtype, device=local_hits.device) # (3,)
+            half_clip_bounds = clip_bounds / 2.0 
+            normalized_local_hits = torch.clamp(local_hits / clip_bounds, -half_clip_bounds, half_clip_bounds)
+            local_hits = normalized_local_hits
+            
+        self._data.ray_hits_b = local_hits # Shape: (len(env_ids), B, 3)
+
         # data collection mode
         if self.cfg.data_collection:
-            self.data_saver.save_data(self._data.ray_hits_w, self._data.ray_hits_mask)
+            self.data_saver.save_data(self._data.ray_hits_b, self._data.ray_hits_mask)
 
     def _penetrate_and_collect(
         self,
@@ -472,6 +500,8 @@ class RayCasterBox(SensorBase):
                 self.box_visualizer.set_visibility(False)
 
     def _debug_vis_callback(self, event):
+        if self._data.ray_hits_mask is None:
+            return
         # remove possible inf values
         hits_points = self._data.ray_hits_w[self._data.ray_hits_mask].view(-1, 3)
         hits_points = hits_points[~torch.any(torch.isinf(hits_points), dim=1)]

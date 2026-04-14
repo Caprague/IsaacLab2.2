@@ -99,9 +99,16 @@ class RayCasterLidarCfg(SensorBaseCfg):
     默认为 False，这意味着射线模式仅在初始化时计算一次，并在整个仿真过程中保持静态。
     这是大多数射线投射传感器的默认行为。
     """
+    
+    data_box_clip: tuple[float, float, float] | None = None
+    """非 None 时，将按照给定的包围盒尺寸，对数据进行裁剪。"""
+    
+    data_normalization: bool = False
+    """仅当时 data_box_clip 有效时可用，控制是否对包围盒裁剪后的数据进行归一化处理，范围 (-0.5, +0.5)"""
 
     data_collection: bool = False
     """是否启用数据收集。"""
 
     data_save_path: str | None = None
     """数据保存路径。"""
+    

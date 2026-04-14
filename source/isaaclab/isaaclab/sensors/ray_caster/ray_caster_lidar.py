@@ -75,6 +75,11 @@ class RayCasterLidar(SensorBase):
         # the warp meshes used for raycasting.
         self.meshes: dict[str, wp.Mesh] = {}
         
+        # check the data box clip params setting
+        if self.cfg.data_box_clip is not None:
+            for i, val in enumerate(self.cfg.data_box_clip):
+                assert isinstance(val, (int, float)) and val > 0, f"Element {i} of data_box_clip must be a positive number, got {val}"
+        
         # check the data collection mode flag
         if cfg.data_collection:
             assert cfg.data_save_path is not None, "Must set data_save_path while data_collection is True !!!"
@@ -237,7 +242,8 @@ class RayCasterLidar(SensorBase):
         self._data.pos_w = torch.zeros(self._view.count, 3, device=self._device)
         self._data.quat_w = torch.zeros(self._view.count, 4, device=self._device)
         self._data.ray_hits_w = torch.zeros(self._view.count, self.num_rays, 3, device=self._device)
-        self._data.ray_hits_mask = torch.zeros(self._view.count, self.num_rays, 3, device=self._device)
+        self._data.ray_hits_b = torch.zeros(self._view.count, self.num_rays, 3, device=self._device)
+        self._data.ray_hits_mask = torch.zeros(self._view.count, self.num_rays, dtype=torch.bool, device=self._device)
 
     def _update_buffers_impl(self, env_ids: Sequence[int]):
         """Fills the buffers of the sensor data."""
@@ -327,9 +333,55 @@ class RayCasterLidar(SensorBase):
         # apply vertical drift to ray starting position in ray caster frame
         self._data.ray_hits_w[env_ids, :, 2] += self.ray_cast_drift[env_ids, 2].unsqueeze(-1)
 
+        # 回归传感器本体坐标系（但采用水平基准）
+        current_pos_w = self._data.pos_w[env_ids] # (N, 3) - 传感器在世界的位置
+        current_quat_w = self._data.quat_w[env_ids] # (N, 4) - 传感器在世界的旋转 (wxyz)
+        offset_pos = torch.tensor(list(self.cfg.offset.pos), device=self._device) # (3,)
+        offset_pos_w = quat_apply(current_quat_w, offset_pos.unsqueeze(0).expand(len(env_ids), -1)) # (N, 3)
+        hits_in_root_frame = self._data.ray_hits_w[env_ids] - current_pos_w.unsqueeze(1) # (N, B, 3)
+        local_hits = hits_in_root_frame - offset_pos_w.unsqueeze(1) # (N, B, 3)
+
+        if self.cfg.ray_alignment == "world":
+            pass
+        elif self.cfg.ray_alignment == "yaw":
+            quat_yaw_inv = torch.stack([
+                current_quat_w[:, 0],
+                -current_quat_w[:, 1],
+                -current_quat_w[:, 2],
+                 torch.zeros_like(current_quat_w[:, 3])
+            ], dim=-1)
+            quat_yaw_inv = quat_yaw_inv / torch.linalg.norm(quat_yaw_inv, dim=-1, keepdim=True)
+            local_hits = quat_apply_yaw(quat_yaw_inv.repeat(1, self.num_rays).view(-1, 4), local_hits.view(-1, 3)).view(local_hits.shape) # (N, B, 3)
+        elif self.cfg.ray_alignment == "base":
+            quat_inv = math_utils.quat_inv(current_quat_w) # (N, 4)
+            local_hits = quat_apply(quat_inv.repeat(1, self.num_rays).view(-1, 4), local_hits.view(-1, 3)).view(local_hits.shape) # (N, B, 3)
+        else:
+            raise RuntimeError(f"Unsupported ray_alignment type: {self.cfg.ray_alignment}. Cannot transform to local frame.")
+
+        # 包围盒裁剪
+        if self.cfg.data_box_clip is not None:
+            clip_bounds = torch.tensor(self.cfg.data_box_clip, dtype=local_hits.dtype, device=local_hits.device)
+            half_clip_bounds = clip_bounds / 2.0 
+            clip_mask = torch.all(torch.abs(local_hits) < half_clip_bounds, dim=-1) # (N, B)
+
+            # 更新掩码：只有既不是 inf 又在包围盒内的点才是有效的
+            hit_mask = ~torch.any(torch.isinf(self._data.ray_hits_w[env_ids]), dim=-1) # Shape: NxB
+            final_mask = hit_mask & clip_mask # Shape: NxB (最终掩码)
+
+            # 归一化处理
+            if self.cfg.data_normalization: # 检查归一化参数是否存在且为True
+                 normalized_local_hits = local_hits / clip_bounds # (N, B, 3)
+                 local_hits = normalized_local_hits
+        else:
+            # 如果没有裁剪，则使用原始的 inf 掩码
+            final_mask = ~torch.any(torch.isinf(self._data.ray_hits_w[env_ids]), dim=-1) # Shape: NxB
+
+        self._data.ray_hits_b[env_ids] = local_hits
+        self._data.ray_hits_mask[env_ids] = final_mask
+
         # data collection mode
         if self.cfg.data_collection:
-            self.data_saver.save_data(self._data.ray_hits_w, self._data.ray_hits_mask)
+            self.data_saver.save_data(self._data.ray_hits_b, self._data.ray_hits_mask)
 
     def _set_debug_vis_impl(self, debug_vis: bool):
         # set visibility of markers
@@ -344,11 +396,12 @@ class RayCasterLidar(SensorBase):
                 self.ray_visualizer.set_visibility(False)
 
     def _debug_vis_callback(self, event):
+        viz_points = self._data.ray_hits_w[self._data.ray_hits_mask].view(-1, 3)
         # remove possible inf values
-        viz_points = self._data.ray_hits_w.reshape(-1, 3)
         viz_points = viz_points[~torch.any(torch.isinf(viz_points), dim=1)]
-        # show ray hit positions
-        self.ray_visualizer.visualize(viz_points)
+        if viz_points is not None and viz_points.shape[0] >= 1:
+            # show ray hit positions
+            self.ray_visualizer.visualize(viz_points)
 
     """
     Internal simulation callbacks.
