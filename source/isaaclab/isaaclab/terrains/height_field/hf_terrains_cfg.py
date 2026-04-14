@@ -10,6 +10,7 @@ from isaaclab.utils import configclass
 from ..sub_terrain_cfg import SubTerrainBaseCfg
 from . import hf_terrains
 
+from typing import Literal
 
 @configclass
 class HfTerrainBaseCfg(SubTerrainBaseCfg):
@@ -208,4 +209,140 @@ class HfSteppingSlopeStonesTerrainCfg(HfTerrainBaseCfg):
     """The width of the square platform at the center of the terrain. Defaults to 1.0."""
 
     stone_slope_range: tuple[float, float] = (0.0, 0.2)  # 新增：石头斜度范围（坡度，以高度差表示）
+
+
+@configclass
+class ImageHeightLayerCfg:
+    """Configuration for a single image-based height layer."""
+
+    image_path: str = MISSING
+    """Path to the image file for this layer."""
+
+    height_scale: float = 0.1
+    """Height scaling factor for this layer. Multiplies the extracted height values."""
+
+    blend_mode: Literal["add", "multiply", "max", "min"] = "add"
+    """Blending mode for combining this layer with other layers.
+    
+    Available modes:
+    - "add": Add layer heights to accumulated heights (default)
+    - "multiply": Multiply accumulated heights by (1 + layer_height)
+    - "max": Use maximum of accumulated and layer heights
+    - "min": Use minimum of accumulated and layer heights
+    """
+
+    color_mode: Literal["grayscale", "hsv"] = "hsv"
+    """Color mode for extracting height information from the image.
+    
+    Available modes:
+    - "grayscale": Convert to grayscale and use luminance (default)
+    - "hsv": Use hue value from HSV color space (0-360 degrees)
+    """
+
+    smoothing_sigma: float = 0.0
+    """Smoothing sigma (radius) for this layer's height field in pixels. Defaults to 0.0 (no smoothing).
+    
+    When non-zero, applies Gaussian smoothing to the layer's height field before blending,
+    which can help reduce jagged edges and artifacts from image-based terrain generation.
+    """
+
+
+@configclass
+class HfImageBasedTerrainCfg(HfTerrainBaseCfg):
+    """Configuration for image-based height field terrain generation.
+
+    This configuration allows generating terrains from image files, where pixel colors
+    are mapped to terrain heights. Supports both single-image and multi-layer blending modes.
+
+    Note:
+        Image dimensions are automatically validated against the maximum allowed size
+        calculated from terrain size and horizontal scale. Images must not exceed these limits.
+    """
+
+    function = hf_terrains.image_based_terrain
+
+    # Single image mode (backward compatible)
+    image_path: str | None = None
+    """Path to a single image file. Use this instead of layer_configs for simple terrains."""
+
+    height_scale: float = 0.1
+    """Global height scaling factor. Multiplies the color values to get actual height."""
+
+    color_mode: Literal["grayscale", "hsv"] = "hsv"
+    """Color mode for extracting height information from images.
+    
+    Available modes:
+    - "grayscale": Convert to grayscale and use luminance (default)
+    - "hsv": Use hue value from HSV color space (0-360 degrees, suitable for heatmaps)
+    """
+
+    # Multi-layer blending mode
+    layer_configs: list[ImageHeightLayerCfg] | None = None
+    """List of image layer configurations for multi-layer blending.
+    Use this instead of image_path for complex terrains with multiple layers."""
+
+    grayscale_zero_point: float = 127.5
+    """The grayscale value that corresponds to zero height when using grayscale color mode. Defaults to 127.5.
+
+    When using grayscale color mode, this value determines which brightness corresponds to the baseline terrain height.
+    Values above this point represent elevated terrain (positive heights), while values below
+    represent depressed terrain (negative heights).
+
+    Example with grayscale_zero_point=127.5:
+    - Value 0 (black): Maximum depression
+    - Value 63.75: Medium depression
+    - Value 127.5: Zero height (baseline)
+    - Value 191.25: Medium elevation
+    - Value 255 (white): Maximum elevation
+    """
+    
+    hsv_zero_point: float = 180.0
+    """The hue value that corresponds to zero height when using HSV color mode. Defaults to 180.0.
+
+    When using HSV color mode, this value determines which hue corresponds to the baseline terrain height.
+    Hue values above this point represent elevated terrain (positive heights), while values below
+    represent depressed terrain (negative heights).
+
+    Example with hsv_zero_point=180.0:
+    - Hue 0° (red): Maximum depression
+    - Hue 120° (green): Medium depression
+    - Hue 180° (cyan): Zero height (baseline)
+    - Hue 240° (blue): Medium elevation
+    - Hue 360° (red): Maximum elevation
+    """
+    
+    invert_height: bool = False
+    """If True, invert the height values (white becomes low, black becomes high)."""
+    
+    platform_width: float = 1.0
+    """Width of the flat platform at the center of the terrain (in m). Defaults to 1.0.
+    Set to 0.0 to disable platform."""
+
+    terrain_smoothing_sigma: float = 0.0
+    """Smoothing sigma (radius) for the final combined terrain in pixels. Defaults to 0.0 (no smoothing).
+    
+    When non-zero, applies Gaussian smoothing to the final combined terrain before adding platform.
+    This helps reduce jagged edges and artifacts from the image-based terrain generation.
+    """
+
+    resize_to_target: bool = False
+    """If True, resize the image to match the target terrain dimensions using interpolation.
+    If False (default), center the original image in the target terrain dimensions when image is smaller.
+    """
+
+    resize_interpolation: Literal["nearest", "bilinear", "bicubic", "lanczos"] = "bilinear"
+    """Interpolation method to use when resize_to_target is True. Defaults to "bilinear".
+
+    Available modes:
+    - "nearest": Nearest neighbor interpolation
+    - "bilinear": Bilinear interpolation (default)
+    - "bicubic": Bicubic interpolation
+    - "lanczos": Lanczos interpolation (highest quality, slower)
+    """
+
+    save_resized_image: bool = False
+    """If True, save the resized image to a file when resize_to_target is True.
+    The saved image will have the same name as the original but with '_resize' suffix added before the extension.
+    Only applicable when resize_to_target is True. Defaults to False.
+    """
 

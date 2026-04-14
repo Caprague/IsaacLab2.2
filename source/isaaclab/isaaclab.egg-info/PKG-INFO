@@ -30,7 +30,7 @@ Requires-Dist: starlette==0.45.3
 Requires-Dist: pytest
 Requires-Dist: pytest-mock
 Requires-Dist: junitparser
-Requires-Dist: flatdict==4.0.1
+Requires-Dist: flatdict
 Requires-Dist: flaky
 Requires-Dist: pin-pink==3.1.0; platform_system == "Linux" and platform_machine in "x86_64,AMD64"
 Requires-Dist: dex-retargeting==0.4.6; platform_system == "Linux" and platform_machine in "x86_64,AMD64"

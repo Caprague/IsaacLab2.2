@@ -10,13 +10,13 @@ pillow==11.2.1
 packaging<24
 
 [all]
-rsl-rl-lib==3.0.1
-skrl>=1.4.3
-rl-games @ git+https://github.com/isaac-sim/rl_games.git@python3.11
 rich
-tqdm
-stable-baselines3>=2.6
 gym
+skrl>=1.4.3
+stable-baselines3>=2.6
+rl-games @ git+https://github.com/isaac-sim/rl_games.git@python3.11
+tqdm
+rsl-rl-lib==3.0.1
 
 [rl-games]
 rl-games @ git+https://github.com/isaac-sim/rl_games.git@python3.11

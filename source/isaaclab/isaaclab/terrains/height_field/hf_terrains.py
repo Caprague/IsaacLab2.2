@@ -10,8 +10,9 @@ from __future__ import annotations
 import numpy as np
 import scipy.interpolate as interpolate
 from typing import TYPE_CHECKING
+from PIL import Image
 
-from .utils import height_field_to_mesh
+from .utils import height_field_to_mesh, height_field_to_mesh_center
 
 if TYPE_CHECKING:
     from . import hf_terrains_cfg
@@ -593,4 +594,381 @@ def stepping_slope_stones_terrain(difficulty: float, cfg: hf_terrains_cfg.HfStep
             start_x += stone_width + stone_distance
 
     return np.rint(hf_raw).astype(np.int16)
+
+
+# ====================================================================================================
+# Image-based terrain generation functions
+# ====================================================================================================
+
+
+def _load_image(image_path: str, target_size: tuple[int, int] | None = None,
+                interpolation: str = "bilinear", save_resized: bool = False) -> np.ndarray:
+    """Load an image with optional resizing and saving.
+
+    Args:
+        image_path: Path to the image file.
+        target_size: Optional target size as (width, height) in pixels.
+        interpolation: Interpolation method when resizing.
+        save_resized: If True, save the resized image to a file.
+
+    Returns:
+        The image as a numpy array with dimensions (height, width, channels).
+    """
+    img = Image.open(image_path)
+    
+    # Resize to target dimensions if specified
+    if target_size is not None:
+        img = img.resize(target_size, Image.Resampling[interpolation.upper()])
+        
+        # Save resized image if requested
+        if save_resized:
+            # Generate output path by adding '_resize' before the extension
+            import os
+            base, ext = os.path.splitext(image_path)
+            output_path = f"{base}_resize{ext}"
+            img.save(output_path)
+            print(f"Resized image saved to: {output_path}")
+    
+    img_array = np.array(img)
+    return img_array
+
+
+def _extract_height_from_image(image: np.ndarray, color_mode: str, hsv_zero_point: float = 180.0, grayscale_zero_point: float = 127.5) -> np.ndarray:
+    """Extract height information from an image based on the specified color mode.
+
+    Args:
+        image: Input image as numpy array.
+        color_mode: Color mode for height extraction ("grayscale" or "hsv").
+        hsv_zero_point: Hue value corresponding to zero height (0-360). Defaults to 180.0.
+        grayscale_zero_point: Grayscale value corresponding to zero height (0-255). Defaults to 127.5.
+
+    Returns:
+        Height field as 2D numpy array with raw values.
+        
+        For both modes: Values range from 0.0 to 1.0 where 0.5 corresponds to zero height.
+        - Values > 0.5: Elevated terrain (convex)
+        - Values < 0.5: Depressed terrain (concave)
+        - Value = 0.5: Zero height (baseline)
+    """
+    if color_mode == "grayscale":
+        # Convert to grayscale using luminance formula
+        if len(image.shape) == 3:
+            height_field = np.dot(image[..., :3], [0.2989, 0.5870, 0.1140])
+        else:
+            height_field = image.astype(np.float32)
+        
+        # Map grayscale to height based on zero_point
+        # value > grayscale_zero_point: elevated (convex)
+        # value < grayscale_zero_point: depressed (concave)
+        # value == grayscale_zero_point: zero height
+        height_field = height_field - grayscale_zero_point
+    
+    elif color_mode == "hsv":
+        # Use hue value from HSV color space with zero-point mapping
+        from skimage.color import rgb2hsv
+        
+        # Convert RGBA to RGB if needed (take only first 3 channels)
+        if image.shape[2] == 4:
+            image_rgb = image[:, :, :3]
+        else:
+            image_rgb = image
+        
+        hsv_image = rgb2hsv(image_rgb.astype(np.float32) / 255.0)
+        hue = hsv_image[:, :, 0] * 360.0  # Hue in degrees 0-360
+        
+        # Map hue to height based on zero_point
+        # hue > hsv_zero_point: elevated (convex)
+        # hue < hsv_zero_point: depressed (concave)
+        # hue == hsv_zero_point: zero height
+        height_field = hue - hsv_zero_point
+            
+    else:
+        raise ValueError(f"Unknown color mode: {color_mode}")
+    
+    return height_field
+
+
+def _process_single_image(cfg: "hf_terrains_cfg.HfImageBasedTerrainCfg", difficulty: float = 1.0) -> np.ndarray:
+    """Process a single image to generate height field.
+
+    The image is processed to match the terrain dimensions, then converted to discretized heights.
+    Processing order: load/resize → normalize → scale → discretize to maintain precision.
+
+    Args:
+        cfg: Image-based terrain configuration (may be modified by decorator).
+
+    Returns:
+        Height field as 2D numpy array with discretized heights (int16).
+
+    Raises:
+        ValueError: If image dimensions exceed the maximum allowed by terrain size and horizontal scale.
+    """
+    # Calculate target pixel dimensions based on current cfg.size (modified by decorator)
+    target_width_pixels = int(cfg.size[0] / cfg.horizontal_scale)
+    target_length_pixels = int(cfg.size[1] / cfg.horizontal_scale)
+
+    # Load image with optional resizing
+    if cfg.resize_to_target:
+        # Resize image to match target dimensions
+        image = _load_image(cfg.image_path,
+                            target_size=(target_width_pixels, target_length_pixels),
+                            interpolation=cfg.resize_interpolation,
+                            save_resized=cfg.save_resized_image)
+    else:
+        # Load image with original dimensions
+        image = _load_image(cfg.image_path)
+
+    # Get actual image dimensions (height, width)
+    img_height, img_width = image.shape[:2]
+
+    # Validate image dimensions (only needed when not resizing)
+    if not cfg.resize_to_target:
+        if img_width > target_width_pixels:
+            raise ValueError(
+                f"Image width ({img_width} pixels) exceeds maximum allowed width "
+                f"({target_width_pixels} pixels) for terrain size {cfg.size[0]}m "
+                f"with horizontal scale {cfg.horizontal_scale}m. "
+                f"Image path: {cfg.image_path}"
+            )
+        if img_height > target_length_pixels:
+            raise ValueError(
+                f"Image height ({img_height} pixels) exceeds maximum allowed height "
+                f"({target_length_pixels} pixels) for terrain size {cfg.size[1]}m "
+                f"with horizontal scale {cfg.horizontal_scale}m. "
+                f"Image path: {cfg.image_path}"
+            )
+
+    # Extract height from image (raw values)
+    height_field = _extract_height_from_image(image, cfg.color_mode, cfg.hsv_zero_point, cfg.grayscale_zero_point)
+    # Apply height scaling (multiply by scale factor)
+    height_field = height_field * cfg.height_scale * difficulty
+
+    # Center height field if needed (only when not resizing)
+    if not cfg.resize_to_target and (img_width != target_width_pixels or img_height != target_length_pixels):
+        # Create target array filled with zeros
+        target_height_field = np.zeros((target_length_pixels, target_width_pixels), dtype=np.float32)
+
+        # Calculate offset to center the height field
+        offset_x = (target_width_pixels - img_width) // 2
+        offset_y = (target_length_pixels - img_height) // 2
+
+        # Place height field in center
+        target_height_field[offset_y:offset_y + img_height, offset_x:offset_x + img_width] = height_field
+        height_field = target_height_field
+
+    return height_field
+
+
+def _process_multi_layer(cfg: "hf_terrains_cfg.HfImageBasedTerrainCfg", difficulty: float = 1.0) -> np.ndarray:
+    """Process multiple image layers with blending.
+
+    All images are processed to match the terrain dimensions, then converted to discretized heights.
+    Processing order: load/resize → normalize → blend → scale → discretize to maintain precision.
+
+    Args:
+        cfg: Image-based terrain configuration with layer_configs (may be modified by decorator).
+
+    Returns:
+        Combined height field as 2D numpy array with discretized heights (int16).
+
+    Raises:
+        ValueError: If any image dimensions exceed the maximum allowed or if images have different dimensions.
+    """
+    # Calculate target pixel dimensions based on current cfg.size (modified by decorator)
+    target_width_pixels = int(cfg.size[0] / cfg.horizontal_scale)
+    target_length_pixels = int(cfg.size[1] / cfg.horizontal_scale)
+    
+    # Load images with optional resizing
+    if cfg.resize_to_target:
+        # Resize all images to match target dimensions
+        first_image = _load_image(cfg.layer_configs[0].image_path,
+                                target_size=(target_width_pixels, target_length_pixels),
+                                interpolation=cfg.resize_interpolation,
+                                save_resized=cfg.save_resized_image)
+        img_height, img_width = first_image.shape[:2]
+    else:
+        # Load images with original dimensions
+        first_image = _load_image(cfg.layer_configs[0].image_path)
+        img_height, img_width = first_image.shape[:2]
+        
+        # Validate first image dimensions
+        if img_width > target_width_pixels:
+            raise ValueError(
+                f"Image width ({img_width} pixels) exceeds maximum allowed width "
+                f"({target_width_pixels} pixels) for terrain size {cfg.size[0]}m "
+                f"with horizontal scale {cfg.horizontal_scale}m. "
+                f"Image path: {cfg.layer_configs[0].image_path}"
+            )
+        
+        if img_height > target_length_pixels:
+            raise ValueError(
+                f"Image height ({img_height} pixels) exceeds maximum allowed height "
+                f"({target_length_pixels} pixels) for terrain size {cfg.size[1]}m "
+                f"with horizontal scale {cfg.horizontal_scale}m. "
+                f"Image path: {cfg.layer_configs[0].image_path}"
+            )
+    
+    # Initialize combined height field with image dimensions
+    combined_height = np.zeros((img_height, img_width), dtype=np.float32)
+    
+    # Process each layer
+    for i, layer_cfg in enumerate(cfg.layer_configs):
+        # Load image
+        if cfg.resize_to_target:
+            image = _load_image(layer_cfg.image_path,
+                              target_size=(target_width_pixels, target_length_pixels),
+                              interpolation=cfg.resize_interpolation,
+                              save_resized=cfg.save_resized_image)
+        else:
+            image = _load_image(layer_cfg.image_path)
+            
+            # Verify dimensions match first image
+            if image.shape[:2] != (img_height, img_width):
+                raise ValueError(
+                    f"All images in multi-layer configuration must have the same dimensions. "
+                    f"First image ({cfg.layer_configs[0].image_path}): ({img_height}, {img_width}), "
+                    f"Layer {i+1} image ({layer_cfg.image_path}): {image.shape[:2]}"
+                )
+        
+        # Extract height from image (raw values)
+        layer_height = _extract_height_from_image(image, layer_cfg.color_mode, cfg.hsv_zero_point, cfg.grayscale_zero_point)
+        # Apply layer-specific scaling
+        layer_height = layer_height * layer_cfg.height_scale * difficulty
+        
+        # Apply layer-specific smoothing if configured
+        if layer_cfg.smoothing_sigma > 0:
+            layer_height = _smooth_layer(height_field=layer_height, smoothing_sigma=layer_cfg.smoothing_sigma)
+        
+        # Blend with combined height field
+        if layer_cfg.blend_mode == "add":
+            combined_height += layer_height
+        elif layer_cfg.blend_mode == "multiply":
+            combined_height *= (1.0 + layer_height)
+        elif layer_cfg.blend_mode == "max":
+            combined_height = np.maximum(combined_height, layer_height)
+        elif layer_cfg.blend_mode == "min":
+            combined_height = np.minimum(combined_height, layer_height)
+        else:
+            raise ValueError(f"Unknown blend mode: {layer_cfg.blend_mode}")
+    
+    # Center height field if needed (only when not resizing)
+    if not cfg.resize_to_target and (img_width != target_width_pixels or img_height != target_length_pixels):
+        # Create target array filled with zeros
+        target_height_field = np.zeros((target_length_pixels, target_width_pixels), dtype=np.float32)
+        
+        # Calculate offset to center the height field
+        offset_x = (target_width_pixels - img_width) // 2
+        offset_y = (target_length_pixels - img_height) // 2
+        
+        # Place height field in center
+        target_height_field[offset_y:offset_y + img_height, offset_x:offset_x + img_width] = combined_height
+        combined_height = target_height_field
+    
+    return combined_height
+
+
+def _smooth_layer(height_field: np.ndarray, smoothing_sigma: float) -> np.ndarray:
+    """Apply Gaussian smoothing to a height field layer.
+
+    Args:
+        height_field: Input height field.
+        smoothing_sigma: Smoothing sigma (radius) in pixels.
+
+    Returns:
+        Smoothed height field.
+    """
+    from scipy.ndimage import gaussian_filter
+    
+    # Apply Gaussian smoothing
+    smoothed = gaussian_filter(height_field, sigma=smoothing_sigma)
+    
+    return smoothed
+
+
+def _add_platform(height_field: np.ndarray, cfg: "hf_terrains_cfg.HfImageBasedTerrainCfg") -> np.ndarray:
+    """Add a flat platform at the center of the terrain.
+
+    Args:
+        height_field: Input height field.
+        cfg: Terrain configuration.
+
+    Returns:
+        Height field with platform added.
+    """
+    if cfg.platform_width <= 0:
+        return height_field
+    
+    # Calculate platform dimensions in pixels
+    width_pixels, length_pixels = height_field.shape
+    platform_width_pixels = int(cfg.platform_width / cfg.horizontal_scale)
+    
+    # Calculate platform boundaries
+    x1 = (width_pixels - platform_width_pixels) // 2
+    x2 = (width_pixels + platform_width_pixels) // 2
+    y1 = (length_pixels - platform_width_pixels) // 2
+    y2 = (length_pixels + platform_width_pixels) // 2
+    
+    # Get height at platform edges for smooth transition
+    platform_height = np.mean([
+        height_field[x1, y1], height_field[x1, y2],
+        height_field[x2, y1], height_field[x2, y2]
+    ])
+    
+    # Set platform area to flat height
+    height_field[x1:x2, y1:y2] = platform_height
+    
+    return height_field
+
+
+@height_field_to_mesh_center
+def image_based_terrain(difficulty: float, cfg: "hf_terrains_cfg.HfImageBasedTerrainCfg") -> np.ndarray:
+    """Generate a terrain based on image files.
+
+    This function generates terrains from images where pixel colors are mapped to terrain heights.
+    Supports both single-image and multi-layer blending modes.
+
+    The :obj:`difficulty` parameter scales the overall height of the terrain.
+
+    .. image:: ../../_static/terrains/height_field/image_based_terrain.jpg
+       :width: 40%
+       :align: center
+
+    Args:
+        difficulty: The difficulty of the terrain. This value between 0 and 1 scales the terrain height.
+        cfg: The configuration for the image-based terrain.
+
+    Returns:
+        The height field of the terrain as a 2D numpy array with discretized heights.
+        The shape of the array is (width, length), where width and length are the number of points
+        along the x and y axis, respectively.
+
+    Raises:
+        ValueError: When neither image_path nor layer_configs is provided.
+    """
+    # Determine mode: single image or multi-layer
+    if cfg.layer_configs is not None:
+        # Multi-layer blending mode
+        height_field = _process_multi_layer(cfg, difficulty)
+    elif cfg.image_path is not None:
+        # Single image mode
+        height_field = _process_single_image(cfg, difficulty)
+    else:
+        raise ValueError("Either 'image_path' or 'layer_configs' must be provided in the configuration.")
+    
+    # Invert if requested
+    if cfg.invert_height:
+        height_field = height_field * (-1.0)
+    
+    # Add center platform if requested (operates on discretized heights)
+    if cfg.platform_width > 0:
+        height_field = _add_platform(height_field, cfg)
+    
+    # Apply terrain smoothing if requested (operates on discretized heights)
+    if cfg.terrain_smoothing_sigma > 0:
+        height_field = _smooth_layer(height_field, cfg.terrain_smoothing_sigma)
+    
+    # Convert to discretized heights (divide by vertical_scale and round)
+    height_field = np.rint(height_field / cfg.vertical_scale).astype(np.int16)
+    
+    return height_field
 

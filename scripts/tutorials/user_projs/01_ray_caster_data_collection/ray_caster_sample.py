@@ -1,153 +1,208 @@
-# Copyright (c) 2022-2025, The Isaac Lab Project Developers (https://github.com/isaac-sim/IsaacLab/blob/main/CONTRIBUTORS.md).
-# All rights reserved.
-#
-# SPDX-License-Identifier: BSD-3-Clause
+#!/usr/bin/env python
+"""Test and visualize box grid pattern ray casting."""
 
-"""
-This script demonstrates how to use the ray-caster sensor.
-
-.. code-block:: bash
-
-    # Usage
-    ./isaaclab.sh -p scripts/tutorials/04_sensors/run_ray_caster.py
-
-"""
-
-"""Launch Isaac Sim Simulator first."""
-
-import argparse
-
-from isaaclab.app import AppLauncher
-
-# add argparse arguments
-parser = argparse.ArgumentParser(description="Ray Caster Test Script")
-# append AppLauncher cli args
-AppLauncher.add_app_launcher_args(parser)
-# parse the arguments
-args_cli = parser.parse_args()
-# launch omniverse app
-app_launcher = AppLauncher(args_cli)
-simulation_app = app_launcher.app
-
-"""Rest everything follows."""
+from typing import Literal, Sequence
+from dataclasses import dataclass
 
 import torch
-import os
-import isaacsim.core.utils.prims as prim_utils
-
-import isaaclab.sim as sim_utils
-from isaaclab.assets import RigidObject, RigidObjectCfg
-from isaaclab.sensors.ray_caster import RayCaster, RayCasterCfg, patterns
-from isaaclab.utils.assets import ISAAC_NUCLEUS_DIR
-from isaaclab.utils.timer import Timer
+import matplotlib.pyplot as plt
+from mpl_toolkits.mplot3d import Axes3D
 
 
-def define_sensor() -> RayCaster:
-    """Defines the ray-caster sensor to add to the scene."""
-    # Create a ray-caster sensor
-    ray_caster_cfg = RayCasterCfg(
-        prim_path="/World/Origin.*/ball",
-        mesh_prim_paths=["/World/ground"],
-        pattern_cfg=patterns.GridPatternCfg(resolution=0.1, size=(2.0, 2.0)),
-        ray_alignment="yaw",
-        debug_vis=not args_cli.headless,
-    )
-    ray_caster = RayCaster(cfg=ray_caster_cfg)
+@dataclass
+class PatternBaseCfg:
+    """Base configuration for a pattern."""
 
-    return ray_caster
+    func: callable = None
 
 
-def design_scene() -> dict:
-    """Design the scene."""
-    # Populate scene
-    # -- Rough terrain
-    # cfg = sim_utils.UsdFileCfg(usd_path=f"{ISAAC_NUCLEUS_DIR}/Environments/Terrains/rough_plane.usd")
-    script_dir = os.path.dirname(os.path.abspath(__file__))
-    cfg = sim_utils.UsdFileCfg(usd_path=os.path.join(script_dir, "TrainWorld1.usd"))
-    cfg.func("/World/ground", cfg)
-    # -- Light
-    cfg = sim_utils.DistantLightCfg(intensity=2000)
-    cfg.func("/World/light", cfg)
+class BoxGridPatternCfg(PatternBaseCfg):
+    """Configuration for the box grid pattern for ray-casting."""
 
-    # Create separate groups called "Origin1", "Origin2", "Origin3"
-    # Each group will have a robot in it
-    origins = [[0.25, 0.25, 0.0], [-0.25, 0.25, 0.0], [0.25, -0.25, 0.0], [-0.25, -0.25, 0.0]]
-    for i, origin in enumerate(origins):
-        prim_utils.create_prim(f"/World/Origin{i}", "Xform", translation=origin)
-    # -- Balls
-    cfg = RigidObjectCfg(
-        prim_path="/World/Origin.*/ball",
-        spawn=sim_utils.SphereCfg(
-            radius=0.25,
-            rigid_props=sim_utils.RigidBodyPropertiesCfg(),
-            mass_props=sim_utils.MassPropertiesCfg(mass=0.5),
-            collision_props=sim_utils.CollisionPropertiesCfg(),
-            visual_material=sim_utils.PreviewSurfaceCfg(diffuse_color=(0.0, 0.0, 1.0)),
-        ),
-    )
-    balls = RigidObject(cfg)
-    # -- Sensors
-    ray_caster = define_sensor()
-
-    # return the scene information
-    scene_entities = {"balls": balls, "ray_caster": ray_caster}
-    return scene_entities
+    resolution: float = 0.5
+    size: tuple[float, float, float] = (3.0, 3.0, 4.0)
+    directions: Sequence[tuple[float, float, float]] = ((1.0, 0.0, 0.0), (0.0, 1.0, 0.0), (0.0, 0.0, 1.0))
+    ordering: Literal["xy", "yx"] = "xy"
 
 
-def run_simulator(sim: sim_utils.SimulationContext, scene_entities: dict):
-    """Run the simulator."""
-    # Extract scene_entities for simplified notation
-    ray_caster: RayCaster = scene_entities["ray_caster"]
-    balls: RigidObject = scene_entities["balls"]
+def box_grid_pattern(cfg: BoxGridPatternCfg, device: str) -> tuple[torch.Tensor, torch.Tensor]:
+    """A 3D box grid pattern for ray casting with multi-face sampling.
 
-    # define an initial position of the sensor
-    ball_default_state = balls.data.default_root_state.clone()
-    ball_default_state[:, :3] = torch.rand_like(ball_default_state[:, :3]) * 10
+    Args:
+        cfg: The configuration instance for the box grid pattern.
+        device: The device to create the pattern on.
 
-    # Create a counter for resetting the scene
-    step_count = 0
-    # Simulate physics
-    while simulation_app.is_running():
-        # Reset the scene
-        if step_count % 250 == 0:
-            # reset the balls
-            balls.write_root_pose_to_sim(ball_default_state[:, :7])
-            balls.write_root_velocity_to_sim(ball_default_state[:, 7:])
-            # reset the sensor
-            ray_caster.reset()
-            # reset the counter
-            step_count = 0
-        # Step simulation
-        sim.step()
-        # Update the ray-caster
-        with Timer(
-            f"Ray-caster update with {4} x {ray_caster.num_rays} rays with max height of"
-            f" {torch.max(ray_caster.data.pos_w).item():.2f}"
-        ):
-            ray_caster.update(dt=sim.get_physics_dt(), force_recompute=True)
-        # Update counter
-        step_count += 1
+    Returns:
+        A tuple containing:
+            - ray_starts: Starting positions of rays with shape (total_rays, 3)
+            - ray_directions: Direction vectors of rays with shape (total_rays, 3)
+    """
+    # check valid arguments
+    if cfg.ordering not in ["xy", "yx"]:
+        raise ValueError(f"Ordering must be 'xy' or 'yx'. Received: '{cfg.ordering}'.")
+    if cfg.resolution <= 0:
+        raise ValueError(f"Resolution must be greater than 0. Received: '{cfg.resolution}'.")
+
+    # box dimensions
+    length, width, height = cfg.size
+
+    all_starts = []
+    all_directions = []
+
+    # iterate over each direction
+    for direction in cfg.directions:
+        direction_tensor = torch.tensor(list(direction), device=device, dtype=torch.float32)
+        direction_tensor = direction_tensor / torch.norm(direction_tensor)  # normalize
+
+        # find the primary axis (largest absolute component)
+        abs_direction = torch.abs(direction_tensor)
+        primary_axis = torch.argmax(abs_direction).item()
+
+        # determine the two secondary axes for the 2D grid
+        if primary_axis == 0:  # x-direction
+            grid_size_1, grid_size_2 = width, height
+            grid_dims = [1, 2]  # y, z
+            start_offset = -length / 2.0
+        elif primary_axis == 1:  # y-direction
+            grid_size_1, grid_size_2 = length, height
+            grid_dims = [0, 2]  # x, z
+            start_offset = -width / 2.0
+        else:  # z-direction
+            grid_size_1, grid_size_2 = length, width
+            grid_dims = [0, 1]  # x, y
+            start_offset = -height / 2.0
+
+        # resolve mesh grid indexing
+        indexing = cfg.ordering if cfg.ordering == "xy" else "ij"
+
+        # create grid for the sampling face
+        grid_1 = torch.arange(
+            start=-grid_size_1 / 2, end=grid_size_1 / 2 + 1.0e-9, step=cfg.resolution, device=device
+        )
+        grid_2 = torch.arange(
+            start=-grid_size_2 / 2, end=grid_size_2 / 2 + 1.0e-9, step=cfg.resolution, device=device
+        )
+        g1, g2 = torch.meshgrid(grid_1, grid_2, indexing=indexing)
+
+        # create ray starts on the face
+        num_rays_face = g1.numel()
+        ray_starts_face = torch.zeros(num_rays_face, 3, device=device)
+        ray_starts_face[:, grid_dims[0]] = g1.flatten()
+        ray_starts_face[:, grid_dims[1]] = g2.flatten()
+        ray_starts_face[:, primary_axis] = start_offset
+
+        # ray directions are all the same
+        ray_directions_face = torch.zeros_like(ray_starts_face)
+        ray_directions_face[:, :] = direction_tensor
+
+        all_starts.append(ray_starts_face)
+        all_directions.append(ray_directions_face)
+
+    # concatenate all directions
+    all_starts = torch.cat(all_starts, dim=0)
+    all_directions = torch.cat(all_directions, dim=0)
+
+    return all_starts, all_directions
 
 
-def main():
-    """Main function."""
-    # Load simulation context
-    sim_cfg = sim_utils.SimulationCfg(device=args_cli.device)
-    sim = sim_utils.SimulationContext(sim_cfg)
-    # Set main camera
-    sim.set_camera_view([0.0, 15.0, 15.0], [0.0, 0.0, -2.5])
-    # Design scene
-    scene_entities = design_scene()
-    # Play simulator
-    sim.reset()
-    # Now we are ready!
-    print("[INFO]: Setup complete...")
-    # Run simulator
-    run_simulator(sim=sim, scene_entities=scene_entities)
+def visualize_box_grid_pattern():
+    """Generate and visualize the box grid pattern."""
+    print("Generating box grid pattern...")
+
+    # Create configuration
+    cfg = BoxGridPatternCfg()
+
+    # Generate pattern
+    ray_starts, ray_directions = box_grid_pattern(cfg, "cpu")
+
+    print(f"Number of rays: {ray_starts.shape[0]}")
+    print(f"Ray starts shape: {ray_starts.shape}")
+    print(f"Ray starts: {ray_starts}")
+    print(f"Ray directions shape: {ray_directions.shape}")
+    print(f"Ray directions: {ray_directions}")
+
+    # Create 3D visualization
+    fig = plt.figure(figsize=(12, 10))
+    ax = fig.add_subplot(111, projection='3d')
+
+    # Colors for different directions
+    colors = ['r', 'g', 'b']
+    labels = ['X-direction (left->right)', 'Y-direction (back->front)', 'Z-direction (bottom->top)']
+
+    # Plot rays by direction
+    for i, direction in enumerate(cfg.directions):
+        direction_tensor = torch.tensor(direction, dtype=torch.float32)
+        direction_tensor = direction_tensor / torch.norm(direction_tensor)
+
+        # Find rays with this direction
+        mask = torch.all(torch.isclose(ray_directions, direction_tensor, atol=1e-5), dim=1)
+        starts = ray_starts[mask]
+
+        # Plot start points
+        ax.scatter(starts[:, 0].numpy(), starts[:, 1].numpy(), starts[:, 2].numpy(),
+                   c=colors[i], marker='o', s=20, alpha=0.6, label=labels[i])
+
+        # Plot ray directions as arrows
+        ray_length = 0.3
+        # Sample some rays to avoid cluttering
+        sample_step = max(1, len(starts) // 30)
+        sample_starts = starts[::sample_step]
+
+        # Create arrow direction vectors
+        arrow_dirs = direction_tensor.unsqueeze(0).repeat(len(sample_starts), 1)
+
+        # Plot arrows using quiver
+        ax.quiver(
+            sample_starts[:, 0].numpy(),
+            sample_starts[:, 1].numpy(),
+            sample_starts[:, 2].numpy(),
+            arrow_dirs[:, 0].numpy(),
+            arrow_dirs[:, 1].numpy(),
+            arrow_dirs[:, 2].numpy(),
+            length=ray_length,
+            normalize=False,
+            color=colors[i],
+            alpha=0.4,
+            arrow_length_ratio=0.2,
+            linewidth=1
+        )
+
+    # Draw bounding box
+    l, w, h = cfg.size
+    corners = [
+        [-l/2, -w/2, -h/2], [l/2, -w/2, -h/2], [l/2, w/2, -h/2], [-l/2, w/2, -h/2],
+        [-l/2, -w/2, h/2], [l/2, -w/2, h/2], [l/2, w/2, h/2], [-l/2, w/2, h/2]
+    ]
+    edges = [
+        [0, 1], [1, 2], [2, 3], [3, 0],  # bottom
+        [4, 5], [5, 6], [6, 7], [7, 4],  # top
+        [0, 4], [1, 5], [2, 6], [3, 7]   # vertical
+    ]
+    for edge in edges:
+        p1, p2 = corners[edge[0]], corners[edge[1]]
+        ax.plot([p1[0], p2[0]], [p1[1], p2[1]], [p1[2], p2[2]],
+                'k-', linewidth=1, alpha=0.3)
+
+    # Set labels and title
+    ax.set_xlabel('X (m)')
+    ax.set_ylabel('Y (m)')
+    ax.set_zlabel('Z (m)')
+    ax.set_title(f'Box Grid Pattern (Size: {l}x{w}x{h}m, Resolution: {cfg.resolution}m)\n'
+                 f'Total Rays: {ray_starts.shape[0]}')
+    ax.legend()
+
+    # Set equal aspect ratio
+    max_range = max(l, w, h) / 2
+    ax.set_xlim([-max_range, max_range])
+    ax.set_ylim([-max_range, max_range])
+    ax.set_zlim([-max_range, max_range])
+
+    # Set view angle
+    ax.view_init(elev=20, azim=45)
+
+    plt.tight_layout()
+    plt.show()
 
 
 if __name__ == "__main__":
-    # run the main function
-    main()
-    # close sim app
-    simulation_app.close()
+    visualize_box_grid_pattern()

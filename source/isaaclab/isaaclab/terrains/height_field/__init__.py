@@ -27,13 +27,15 @@ the corresponding x and y coordinates.
 
 from .hf_terrains_cfg import (
     HfDiscreteObstaclesTerrainCfg,
+    HfImageBasedTerrainCfg,
     HfInvertedPyramidSlopedTerrainCfg,
     HfInvertedPyramidStairsTerrainCfg,
     HfPyramidSlopedTerrainCfg,
     HfPyramidStairsTerrainCfg,
     HfRandomUniformTerrainCfg,
+    HfSteppingSlopeStonesTerrainCfg,
     HfSteppingStonesTerrainCfg,
     HfTerrainBaseCfg,
     HfWaveTerrainCfg,
-    HfSteppingSlopeStonesTerrainCfg,
+    ImageHeightLayerCfg,
 )

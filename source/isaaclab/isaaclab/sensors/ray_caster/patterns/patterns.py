@@ -71,6 +71,77 @@ def grid_pattern(cfg: patterns_cfg.GridPatternCfg, device: str) -> tuple[torch.T
     return ray_starts, ray_directions
 
 
+def mid360_pattern(cfg: patterns_cfg.Mid360PatternCfg, device: str) -> tuple[torch.Tensor, torch.Tensor]:
+    """The Livox Mid-360 LiDAR pattern for ray casting.
+
+    This function reads pre-recorded scan data from a CSV file and generates ray directions
+    based on the Azimuth and Zenith angles. The pattern cycles through the CSV data
+    based on the scan index to simulate continuous scanning.
+
+    The function caches all ray directions in memory on first call for optimal performance.
+
+    Args:
+        cfg: The configuration instance for the pattern.
+        device: The device to create the pattern on.
+
+    Returns:
+        The starting positions and directions of the rays. Shape is (num_rays, 3) for both tensors.
+    """
+    import pandas as pd
+
+    # Initialize cache if not already done
+    if not hasattr(cfg, "_cached_directions"):
+        # Read all data at once (much more efficient than reading in chunks)
+        df = pd.read_csv(
+            cfg.csv_file_path,
+            usecols=["Azimuth/deg", "Zenith/deg"],  # Only read needed columns
+        )
+
+        # Extract all azimuth and zenith angles
+        azimuth = torch.tensor(df["Azimuth/deg"].values, dtype=torch.float32)
+        zenith = torch.tensor(df["Zenith/deg"].values, dtype=torch.float32)
+
+        # Convert degrees to radians
+        azimuth_rad = torch.deg2rad(azimuth)
+        zenith_rad = torch.deg2rad(zenith)
+
+        # Convert spherical coordinates to Cartesian coordinates
+        # Assuming Z is up (robotics coordinate system)
+        # Azimuth: rotation around Z axis (0-360 degrees)
+        # Zenith: angle from Z axis (37.836-97.2123 degrees)
+        x = torch.sin(zenith_rad) * torch.cos(azimuth_rad)
+        y = torch.sin(zenith_rad) * torch.sin(azimuth_rad)
+        z = torch.cos(zenith_rad)
+
+        # Stack into ray directions and cache
+        cfg._cached_directions = torch.stack([x, y, z], dim=1)
+
+        # Initialize scan index
+        cfg._scan_index = 0
+
+    # Calculate the starting row for this scan based on scan_index
+    scan_index = getattr(cfg, "_scan_index", 0)
+    total_scans = cfg.total_points // cfg.points_per_scan
+
+    # Ensure scan_index wraps around
+    scan_index = scan_index % total_scans
+
+    # Calculate row range for this scan
+    start_row = scan_index * cfg.points_per_scan
+    end_row = start_row + cfg.points_per_scan
+
+    # Get the cached directions for this scan
+    ray_directions = cfg._cached_directions[start_row:end_row].to(device)
+
+    # All rays start from the origin
+    ray_starts = torch.zeros_like(ray_directions, device=device)
+
+    # Update scan_index for next call
+    cfg._scan_index = scan_index + 1
+
+    return ray_starts, ray_directions
+
+
 def pinhole_camera_pattern(
     cfg: patterns_cfg.PinholeCameraPatternCfg, intrinsic_matrices: torch.Tensor, device: str
 ) -> tuple[torch.Tensor, torch.Tensor]:
@@ -190,3 +261,102 @@ def lidar_pattern(cfg: patterns_cfg.LidarPatternCfg, device: str) -> tuple[torch
     ray_starts = torch.zeros_like(ray_directions).to(device)
 
     return ray_starts, ray_directions
+
+
+def box_grid_pattern(cfg: patterns_cfg.BoxGridPatternCfg, device: str) -> tuple[torch.Tensor, torch.Tensor]:
+    """A 3D box grid pattern for ray casting with multi-face sampling.
+
+    This pattern creates a comprehensive 3D sampling configuration by generating ray grids on
+    three orthogonal faces of a bounding box. Each face's rays project towards its opposite face,
+    enabling detection of vertical structures, occluded areas, and complex terrain features that
+    standard height-field scanning cannot capture.
+
+    The pattern generates rays for each direction specified in the configuration. For a direction
+    vector (dx, dy, dz), rays originate from the face at -direction and project towards +direction.
+
+    Args:
+        cfg: The configuration instance for the box grid pattern.
+        device: The device to create the pattern on.
+
+    Returns:
+        A tuple containing:
+            - ray_starts: Starting positions of rays with shape (total_rays, 3)
+            - ray_directions: Direction vectors of rays with shape (total_rays, 3)
+
+    Raises:
+        ValueError: If the ordering is not "xy" or "yx".
+        ValueError: If the resolution is less than or equal to 0.
+    """
+    # check valid arguments
+    if cfg.ordering not in ["xy", "yx"]:
+        raise ValueError(f"Ordering must be 'xy' or 'yx'. Received: '{cfg.ordering}'.")
+    if cfg.resolution <= 0:
+        raise ValueError(f"Resolution must be greater than 0. Received: '{cfg.resolution}'.")
+
+    # box dimensions
+    length, width, height = cfg.size
+
+    all_starts = []
+    all_directions = []
+
+    # iterate over each direction
+    for direction in cfg.directions:
+        direction_tensor = torch.tensor(list(direction), device=device, dtype=torch.float32)
+        direction_tensor = direction_tensor / torch.norm(direction_tensor)  # normalize
+
+        # determine which face to use and which dimensions to sample
+        # for direction (dx, dy, dz), we sample on the face perpendicular to this direction
+        # and project in the direction of the vector
+
+        # find the primary axis (largest absolute component)
+        abs_direction = torch.abs(direction_tensor)
+        primary_axis = torch.argmax(abs_direction).item()
+
+        # determine the two secondary axes for the 2D grid
+        if primary_axis == 0:  # x-direction
+            # sample on y-z plane
+            grid_size_1, grid_size_2 = width, height
+            grid_dims = [1, 2]  # y, z
+            start_offset = -length / 2.0
+        elif primary_axis == 1:  # y-direction
+            # sample on x-z plane
+            grid_size_1, grid_size_2 = length, height
+            grid_dims = [0, 2]  # x, z
+            start_offset = -width / 2.0
+        else:  # z-direction
+            # sample on x-y plane
+            grid_size_1, grid_size_2 = length, width
+            grid_dims = [0, 1]  # x, y
+            start_offset = -height / 2.0
+
+        # resolve mesh grid indexing
+        indexing = cfg.ordering if cfg.ordering == "xy" else "ij"
+
+        # create grid for the sampling face
+        grid_1 = torch.arange(
+            start=-grid_size_1 / 2, end=grid_size_1 / 2 + 1.0e-9, step=cfg.resolution, device=device
+        )
+        grid_2 = torch.arange(
+            start=-grid_size_2 / 2, end=grid_size_2 / 2 + 1.0e-9, step=cfg.resolution, device=device
+        )
+        g1, g2 = torch.meshgrid(grid_1, grid_2, indexing=indexing)
+
+        # create ray starts on the face
+        num_rays_face = g1.numel()
+        ray_starts_face = torch.zeros(num_rays_face, 3, device=device)
+        ray_starts_face[:, grid_dims[0]] = g1.flatten()
+        ray_starts_face[:, grid_dims[1]] = g2.flatten()
+        ray_starts_face[:, primary_axis] = start_offset
+
+        # ray directions are all the same (projecting towards the opposite face)
+        ray_directions_face = torch.zeros_like(ray_starts_face)
+        ray_directions_face[:, :] = direction_tensor
+
+        all_starts.append(ray_starts_face)
+        all_directions.append(ray_directions_face)
+
+    # concatenate all directions
+    all_starts = torch.cat(all_starts, dim=0)
+    all_directions = torch.cat(all_directions, dim=0)
+
+    return all_starts, all_directions

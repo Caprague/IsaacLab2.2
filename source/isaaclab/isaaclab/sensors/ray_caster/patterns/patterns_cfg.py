@@ -83,6 +83,64 @@ class GridPatternCfg(PatternBaseCfg):
 
 
 @configclass
+class Mid360PatternCfg(PatternBaseCfg):
+    """Configuration for the Livox Mid-360 LiDAR pattern for ray-casting.
+
+    The Livox Mid-360 is a 360-degree mechanical LiDAR that outputs 200,000 points per second
+    at a typical frequency of 10Hz, resulting in 20,000 points per scan.
+
+    The pattern reads pre-recorded scan data from a CSV file containing Azimuth and Zenith angles.
+
+    For dynamic scanning (simulating continuous LiDAR operation), use this pattern with
+    :class:`~isaaclab.sensors.ray_caster.ray_caster_lidar.RayCaster` and set
+    ``dynamic_pattern=True`` in the sensor configuration. This will cause the pattern to cycle
+    through different scan patterns on each sensor update, simulating the mechanical rotation
+    of the LiDAR.
+
+    Example:
+
+    .. code-block:: python
+
+        from isaaclab.sensors import RayCasterCfg
+        from isaaclab.sensors.patterns import Mid360PatternCfg
+
+        mid360_scanner = RayCasterCfg(
+            pattern_cfg=Mid360PatternCfg(
+                csv_file_path="/path/to/mid360.csv"
+            ),
+            dynamic_pattern=True,  # Enable dynamic scanning
+            update_period=0.1,  # 10 Hz update rate
+            # ... other configurations
+        )
+    """
+
+    func: Callable = patterns.mid360_pattern
+
+    csv_file_path: str = MISSING
+    """Path to the CSV file containing Mid-360 scan data.
+
+    The CSV file should have three columns:
+    - Time/s: Timestamp (unused for pattern generation)
+    - Azimuth/deg: Horizontal angle in degrees (0-360)
+    - Zenith/deg: Vertical angle in degrees (37.836-97.2123)
+    """
+
+    points_per_scan: int = 20000
+    """Number of points per scan. Defaults to 20000.
+
+    Calculated as: 200,000 points/second / 10Hz = 20,000 points/scan
+    """
+
+    total_points: int = 800000
+    """Total number of points in the CSV file. Defaults to 800000.
+
+    Used for cyclic reading of scan data across multiple scans.
+    """
+    
+    _scan_index: int = 0
+
+
+@configclass
 class PinholeCameraPatternCfg(PatternBaseCfg):
     """Configuration for a pinhole camera depth image pattern for ray-casting.
 
@@ -230,3 +288,57 @@ class LidarPatternCfg(PatternBaseCfg):
 
     horizontal_res: float = MISSING
     """Horizontal resolution (in degrees)."""
+
+
+@configclass
+class BoxGridPatternCfg(PatternBaseCfg):
+    """Configuration for the box grid pattern for ray-casting.
+
+    This pattern creates a 3D box sampling pattern with rays originating from three orthogonal faces
+    (e.g., left, top, front) and projecting towards their opposite faces. This enables comprehensive
+    3D terrain sampling within a bounding box, capturing vertical structures and occluded areas
+    that standard height-field scanning cannot reach.
+
+    The pattern is defined by a bounding box size and resolution. The box is centered at the sensor's
+    local origin. The sampling faces are specified by their direction vectors.
+
+    Example:
+        Create a 2x2x2 meter box with 0.1 meter resolution:
+
+        .. code-block:: python
+
+            from isaaclab.sensors.patterns import BoxGridPatternCfg
+
+            pattern_cfg = BoxGridPatternCfg(
+                resolution=0.1,
+                size=(2.0, 2.0, 2.0),  # (length, width, height)
+                directions=[(1, 0, 0), (0, 1, 0), (0, 0, 1)]  # x, y, z directions
+            )
+    """
+
+    func: Callable = patterns.box_grid_pattern
+
+    resolution: float = MISSING
+    """Grid resolution (in meters) for the sampling points on each face."""
+
+    size: tuple[float, float, float] = MISSING
+    """Box size (length, width, height) in meters. The box is centered at the sensor's origin."""
+
+    directions: Sequence[tuple[float, float, float]] = ((1.0, 0.0, 0.0), (0.0, 1.0, 0.0), (0.0, 0.0, 1.0))
+    """Sampling directions. Each tuple defines a direction vector for a face.
+
+    Defaults to three orthogonal directions (x, y, z) corresponding to left, front, and top faces.
+    For each direction, rays originate from the face opposite to the direction vector and
+    project towards the direction.
+
+    For example:
+        - (1, 0, 0): Rays start from left face (x = -length/2) and project rightward
+        - (0, 1, 0): Rays start from back face (y = -width/2) and project forward
+        - (0, 0, 1): Rays start from bottom face (z = -height/2) and project upward
+    """
+
+    ordering: Literal["xy", "yx"] = "xy"
+    """Specifies the ordering of points in the generated 2D grid on each face.
+
+    See :class:`GridPatternCfg` for details on ordering semantics.
+    """

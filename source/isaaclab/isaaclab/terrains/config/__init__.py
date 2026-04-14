@@ -6,3 +6,4 @@
 """Pre-defined terrain configurations for the terrain generator."""
 
 from .rough import *  # noqa: F401
+from .image_heightfield import * # noqa: F401

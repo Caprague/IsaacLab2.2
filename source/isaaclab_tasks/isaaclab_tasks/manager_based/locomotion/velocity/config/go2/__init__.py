@@ -115,7 +115,7 @@ gym.register(
 )
 
 gym.register(
-    id="Isaac-Velocity-Skill-Walk-Unitree-Go2-Play-v0",
+    id="Isaac-Velocity-Skill-Walk-Unitree-Go2-v0-Play",
     entry_point="isaaclab.envs:ManagerBasedRLEnv",
     disable_env_checker=True,
     kwargs={
@@ -124,4 +124,39 @@ gym.register(
         "rsl_rl_distillation_cfg_entry_point": f"{agents.__name__}.rsl_rl_distillation_cfg_walk:UnitreeGo2LocoSkillDistillationRunnerCfg",
     },
 )
+
+# Skill Walk Perception Data Collection
+gym.register(
+    id="Isaac-Velocity-Skill-Walk-Unitree-Go2-v0-Data-Collection",
+    entry_point="isaaclab.envs:ManagerBasedRLEnv",
+    disable_env_checker=True,
+    kwargs={
+        "env_cfg_entry_point": f"{__name__}.go2_loco_skill_walk_data_collection_cfg:Go2LocomotionSkillEnvCfg_Play",
+        "rsl_rl_cfg_entry_point": f"{agents.__name__}.rsl_rl_ppo_cfg_walk:UnitreeGo2LocoSkillPPORunnerCfg",
+        "rsl_rl_distillation_cfg_entry_point": f"{agents.__name__}.rsl_rl_distillation_cfg_walk:UnitreeGo2LocoSkillDistillationRunnerCfg",
+    },
+)
+
+# -------------------------------------------------------------------------------------------------------
+# Zero Agent
+gym.register(
+    id="Go2-Zero-Agent",
+    entry_point="isaaclab.envs:ManagerBasedRLEnv",
+    disable_env_checker=True,
+    kwargs={
+        "env_cfg_entry_point": f"{__name__}.go2_zero_agent_cfg:Go2LocomotionSkillEnvCfg",
+        "rsl_rl_cfg_entry_point": f"{agents.__name__}.rsl_rl_ppo_cfg_zero_agent:UnitreeGo2LocoSkillPPORunnerCfg",
+    },
+)
+
+gym.register(
+    id="Go2-Zero-Agent-Play",
+    entry_point="isaaclab.envs:ManagerBasedRLEnv",
+    disable_env_checker=True,
+    kwargs={
+        "env_cfg_entry_point": f"{__name__}.go2_zero_agent_cfg:Go2LocomotionSkillEnvCfg_Play",
+        "rsl_rl_cfg_entry_point": f"{agents.__name__}.rsl_rl_ppo_cfg_zero_agent:UnitreeGo2LocoSkillPPORunnerCfg",
+    },
+)
+
 
