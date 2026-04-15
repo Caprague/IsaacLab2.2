@@ -101,6 +101,8 @@ class DualPointCloudVisualizer:
         vis1.create_window(window_name="视图 1 (主)", width=960, height=540, left=0, top=0)
         pcd1 = o3d.geometry.PointCloud()
         vis1.add_geometry(pcd1)
+        coordinate_frame = o3d.geometry.TriangleMesh.create_coordinate_frame(size=0.25, origin=[0, 0, 0])
+        vis1.add_geometry(coordinate_frame)
         
         # --- 创建窗口 2 ---
         vis2 = None
@@ -110,6 +112,8 @@ class DualPointCloudVisualizer:
             vis2.create_window(window_name="视图 2 (对比)", width=960, height=540, left=960, top=0)
             pcd2 = o3d.geometry.PointCloud()
             vis2.add_geometry(pcd2)
+            coordinate_frame = o3d.geometry.TriangleMesh.create_coordinate_frame(size=0.25, origin=[0, 0, 0])
+            vis2.add_geometry(coordinate_frame)
 
         current_idx = start_idx
         is_first_frame = True
@@ -215,7 +219,6 @@ def main():
     parser.add_argument("--root_path_1", type=str, required=True, help="第一个数据根目录")
     parser.add_argument("--root_path_2", type=str, default=None, help="第二个数据根目录 (可选)")
     parser.add_argument("--start_idx", type=int, default=0, help="起始索引")
-    
     args = parser.parse_args()
     
     try:
@@ -252,3 +255,4 @@ if __name__ == "__main__":
             visualizer.visualize(args.start_idx)
         except Exception as e:
             print(f"运行时错误: {e}")
+

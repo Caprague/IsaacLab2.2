@@ -91,7 +91,7 @@ class RayCasterBox(SensorBase):
         # check the data collection mode flag
         if cfg.data_collection:
             assert cfg.data_save_path is not None, "Must set data_save_path while data_collection is True !!!"
-            self.pc_data_saver = SimulationDataSaver(cfg.data_save_path, 'pcd', 'complete', ignore_count=1)
+            self.pc_data_saver = SimulationDataSaver(cfg.data_save_path, 'pcd', 'complete')
 
     def __str__(self) -> str:
         """Returns: A string containing information about the instance."""
@@ -273,6 +273,7 @@ class RayCasterBox(SensorBase):
         # fill the data buffer
         self._data.pos_w = torch.zeros(self._view.count, 3, device=self.device)
         self._data.quat_w = torch.zeros(self._view.count, 4, device=self.device)
+        self._data.sensor_pos_w = torch.zeros(self._view.count, 3, device=self._device)
         
         if self.cfg.box_vis:
             self.box_points = torch.zeros_like(self.ray_starts, dtype=torch.float32, device=self.device)
@@ -299,27 +300,33 @@ class RayCasterBox(SensorBase):
         self._data.pos_w[env_ids] = pos_w
         self._data.quat_w[env_ids] = quat_w
 
-        # ray cast based on the sensor poses with yaw alignment
-        # apply horizontal drift to ray starting position in ray caster frame
-        pos_w[:, 0:2] += quat_apply_yaw(quat_w, self.ray_cast_drift[env_ids])[:, 0:2]
-        # 应用 yaw 旋转到起始位置
-        ray_starts_w = quat_apply_yaw(quat_w.repeat(1, self.num_rays), self.ray_starts[env_ids])
-        ray_starts_w += pos_w.unsqueeze(1)
+        # ray cast based on the sensor poses
+        if self.cfg.ray_alignment == "world":
+            # apply horizontal drift to ray starting position in ray caster frame
+            pos_w[:, 0:2] += self.ray_cast_drift[env_ids, 0:2]
+            # no rotation is considered and directions are not rotated
+            ray_starts_w = self.ray_starts[env_ids]
+            ray_starts_w += pos_w.unsqueeze(1)
+            ray_directions_w = self.ray_directions[env_ids]
+        elif self.cfg.ray_alignment == "yaw":
+            # apply horizontal drift to ray starting position in ray caster frame
+            pos_w[:, 0:2] += quat_apply_yaw(quat_w, self.ray_cast_drift[env_ids])[:, 0:2]
+            # only yaw orientation is considered and directions are not rotated
+            ray_starts_w = quat_apply_yaw(quat_w.repeat(1, self.num_rays), self.ray_starts[env_ids])
+            ray_starts_w += pos_w.unsqueeze(1)
+            ray_directions_w = self.ray_directions[env_ids]
+        elif self.cfg.ray_alignment == "base":
+            # apply horizontal drift to ray starting position in ray caster frame
+            pos_w[:, 0:2] += quat_apply(quat_w, self.ray_cast_drift[env_ids])[:, 0:2]
+            # full orientation is considered
+            ray_starts_w = quat_apply(quat_w.repeat(1, self.num_rays), self.ray_starts[env_ids])
+            ray_starts_w += pos_w.unsqueeze(1)
+            ray_directions_w = quat_apply(quat_w.repeat(1, self.num_rays), self.ray_directions[env_ids])
+        else:
+            raise RuntimeError(f"Unsupported ray_alignment type: {self.cfg.ray_alignment}.")
         
         if self.cfg.box_vis:
             self.box_points = ray_starts_w.clone()
-
-        # 对射线方向应用不同的旋转逻辑（向量化实现）
-        ray_directions_w = self.ray_directions[env_ids].clone()
-        # X/Y 方向（水平）：应用 yaw 旋转
-        xy_mask = self.ray_masks[0][env_ids] | self.ray_masks[1][env_ids]
-        if xy_mask.any():
-            xy_indices = torch.where(xy_mask)
-            # 提取对应的四元数：每个环境有 num_rays 条射线，需要将四元数扩展到每条射线
-            quat_expanded = quat_w.unsqueeze(1).expand(-1, self.num_rays, -1)  # (num_envs, num_rays, 4)
-            quat_per_ray = quat_expanded[xy_indices[0], xy_indices[1]]  # (num_xy_rays, 4)
-            # 应用旋转
-            ray_directions_w[xy_indices] = quat_apply_yaw(quat_per_ray, self.ray_directions[env_ids][xy_indices])
         
         # perform multi-layer penetration ray casting with box-based distance limits
         ray_max_distances_w = self.ray_max_distances[env_ids].clone()
@@ -329,24 +336,32 @@ class RayCasterBox(SensorBase):
             ray_max_distances_w
         )
         
-        # 获取当前环境批次的命中数据
-        current_ray_hits_w = self._data.ray_hits_w[env_ids] # Shape: (len(env_ids), num_rays, 3) or similar
-        # 获取传感器在世界坐标系中的位姿
-        current_pos_w = self._data.pos_w[env_ids] # (N, 3) - N = len(env_ids)
-        current_quat_w = self._data.quat_w[env_ids] # (N, 4) - N = len(env_ids)
-        # 计算 offset 对应的世界位移
+        # 回归传感器本体坐标系（但采用水平基准）
+        current_pos_w = self._data.pos_w[env_ids] # (N, 3) - 传感器在世界的位置
+        current_quat_w = self._data.quat_w[env_ids] # (N, 4) - 传感器在世界的旋转 (wxyz)
         offset_pos = torch.tensor(list(self.cfg.offset.pos), device=self._device) # (3,)
-        B = current_ray_hits_w.shape[1]
-        offset_pos_w = quat_apply(current_quat_w.unsqueeze(1).expand(-1, B, -1), offset_pos.unsqueeze(0).unsqueeze(0).expand(len(env_ids), B, -1)) # (N, B, 3)
-        hits_in_root_frame = current_ray_hits_w - current_pos_w.unsqueeze(1) # (N, B, 3)
-        local_hits_before_yaw_rotation = hits_in_root_frame - offset_pos_w # (N, B, 3)
-        # 计算逆偏航旋转 (用于 "yaw" 模式)
-        quat_inv_full = math_utils.quat_inv(current_quat_w) # (N, 4) - 完整的逆旋转
-        quat_inv_full_expanded = quat_inv_full.unsqueeze(1).expand(-1, B, -1).reshape(-1, 4)
-        # 应用逆偏航旋转，将点转到传感器本体坐标系
-        local_hits_viewed = local_hits_before_yaw_rotation.view(-1, 3) # (N*B, 3)
-        local_hits_after_yaw_rotation = quat_apply_yaw(quat_inv_full_expanded, local_hits_viewed) # (N*B, 3)
-        local_hits = local_hits_after_yaw_rotation.view(local_hits_before_yaw_rotation.shape) # (N, B, 3)
+        offset_pos_w = quat_apply(current_quat_w, offset_pos.unsqueeze(0).expand(len(env_ids), -1)) # (N, 3)
+        # 逆平移（base + sensor）
+        self._data.sensor_pos_w[env_ids] = current_pos_w.unsqueeze(1) + offset_pos_w.unsqueeze(1)
+        local_hits = self._data.ray_hits_w[env_ids] - self._data.sensor_pos_w[env_ids] # (N, B, 3)
+        B = len(env_ids)
+        
+        if self.cfg.ray_alignment == "world":
+            pass
+        elif self.cfg.ray_alignment == "yaw":
+            quat_yaw_inv = torch.stack([
+                current_quat_w[:, 0],
+                -current_quat_w[:, 1],
+                -current_quat_w[:, 2],
+                 torch.zeros_like(current_quat_w[:, 3])
+            ], dim=-1)
+            quat_yaw_inv = quat_yaw_inv / torch.linalg.norm(quat_yaw_inv, dim=-1, keepdim=True)
+            local_hits = quat_apply_yaw(quat_yaw_inv.repeat(1, B).view(-1, 4), local_hits.view(-1, 3)).view(local_hits.shape) # (N, B, 3)
+        elif self.cfg.ray_alignment == "base":
+            quat_inv = math_utils.quat_inv(current_quat_w) # (N, 4)
+            local_hits = quat_apply(quat_inv.repeat(1, B).view(-1, 4), local_hits.view(-1, 3)).view(local_hits.shape) # (N, B, 3)
+        else:
+            raise RuntimeError(f"Unsupported ray_alignment type: {self.cfg.ray_alignment}. Cannot transform to local frame.")
 
         # 归一化处理
         if self.cfg.data_normalization:

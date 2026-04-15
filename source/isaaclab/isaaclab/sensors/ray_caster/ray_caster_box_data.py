@@ -21,6 +21,13 @@ class RayCasterBoxData:
 
     Shape is (N, 4), where N is the number of sensors.
     """
+    
+    sensor_pos_w: torch.Tensor = None
+    """Position of the sensor origin in world frame.
+
+    Shape is (N, 3), where N is the number of sensors.
+    """
+    
     ray_hits_w: torch.Tensor = None
     """The ray hit positions in the world frame.
 

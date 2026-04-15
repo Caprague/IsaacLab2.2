@@ -83,8 +83,8 @@ class RayCasterLidar(SensorBase):
         # check the data collection mode flag
         if cfg.data_collection:
             assert cfg.data_save_path is not None, "Must set data_save_path while data_collection is True !!!"
-            self.pc_data_saver = SimulationDataSaver(cfg.data_save_path, 'pcd', 'partial', ignore_count=1)
-            self.pose_data_saver = SimulationDataSaver(cfg.data_save_path, 'npz', 'transform', ignore_count=1, pose_mode="relative")
+            self.pc_data_saver = SimulationDataSaver(cfg.data_save_path, 'pcd', 'partial')
+            self.pose_data_saver = SimulationDataSaver(cfg.data_save_path, 'npz', 'transform', pose_mode="world")
 
     def __str__(self) -> str:
         """Returns: A string containing information about the instance."""
@@ -243,6 +243,7 @@ class RayCasterLidar(SensorBase):
         # fill the data buffer
         self._data.pos_w = torch.zeros(self._view.count, 3, device=self._device)
         self._data.quat_w = torch.zeros(self._view.count, 4, device=self._device)
+        self._data.sensor_pos_w = torch.zeros(self._view.count, 3, device=self._device)
         self._data.ray_hits_w = torch.zeros(self._view.count, self.num_rays, 3, device=self._device)
         self._data.ray_hits_b = torch.zeros(self._view.count, self.num_rays, 3, device=self._device)
         self._data.ray_hits_mask = torch.zeros(self._view.count, self.num_rays, dtype=torch.bool, device=self._device)
@@ -336,12 +337,13 @@ class RayCasterLidar(SensorBase):
         self._data.ray_hits_w[env_ids, :, 2] += self.ray_cast_drift[env_ids, 2].unsqueeze(-1)
 
         # 回归传感器本体坐标系（但采用水平基准）
-        current_pos_w = self._data.pos_w[env_ids] # (N, 3) - 传感器在世界的位置
-        current_quat_w = self._data.quat_w[env_ids] # (N, 4) - 传感器在世界的旋转 (wxyz)
+        current_pos_w = self._data.pos_w[env_ids] # (N, 3) - 机器人base在世界的位置
+        current_quat_w = self._data.quat_w[env_ids] # (N, 4) - 机器人base在世界的旋转 (wxyz)
         offset_pos = torch.tensor(list(self.cfg.offset.pos), device=self._device) # (3,)
         offset_pos_w = quat_apply(current_quat_w, offset_pos.unsqueeze(0).expand(len(env_ids), -1)) # (N, 3)
-        hits_in_root_frame = self._data.ray_hits_w[env_ids] - current_pos_w.unsqueeze(1) # (N, B, 3)
-        local_hits = hits_in_root_frame - offset_pos_w.unsqueeze(1) # (N, B, 3)
+        # 计算传感器的世界位置（base + offset）
+        self._data.sensor_pos_w[env_ids] = current_pos_w + offset_pos_w  # (N, 3)
+        local_hits = self._data.ray_hits_w[env_ids] - self._data.sensor_pos_w[env_ids].unsqueeze(1)  # (N, B, 3)
 
         if self.cfg.ray_alignment == "world":
             pass
@@ -384,7 +386,7 @@ class RayCasterLidar(SensorBase):
         # data collection mode
         if self.cfg.data_collection:
             self.pc_data_saver.save_data(self._data.ray_hits_b, self._data.ray_hits_mask)
-            self.pose_data_saver.save_data(self._data.pos_w, self._data.quat_w)
+            self.pose_data_saver.save_data(self._data.sensor_pos_w, self._data.quat_w)
 
     def _set_debug_vis_impl(self, debug_vis: bool):
         # set visibility of markers

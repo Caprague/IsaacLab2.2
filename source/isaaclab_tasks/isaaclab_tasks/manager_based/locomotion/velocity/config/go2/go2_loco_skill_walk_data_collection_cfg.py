@@ -156,11 +156,12 @@ class MySceneCfg(InteractiveSceneCfg):
         data_box_clip=(3.2, 3.2, 3.2),
         data_normalization=True,
         data_collection=True,
-        data_save_path="/home/gms/Isaac/IsaacLab2.2/DataCollection",
+        data_save_path="/home/gms/Isaac/IsaacLab2.2/DataCollection/Meta",
     )
     gt_scanner = RayCasterBoxCfg(
         prim_path="{ENV_REGEX_NS}/Robot/base",
         offset=RayCasterBoxCfg.OffsetCfg(pos=(0.28945, 0.0, -0.04682)),
+        ray_alignment="base",
         pattern_cfg=patterns.BoxGridPatternCfg(
             resolution=0.05,
             size=(3.2, 3.2, 3.2),
@@ -173,7 +174,7 @@ class MySceneCfg(InteractiveSceneCfg):
         mesh_prim_paths=["/World/ground"],
         data_normalization=True,
         data_collection=True,
-        data_save_path="/home/gms/Isaac/IsaacLab2.2/DataCollection",
+        data_save_path="/home/gms/Isaac/IsaacLab2.2/DataCollection/Meta",
     )
     
     # 光源

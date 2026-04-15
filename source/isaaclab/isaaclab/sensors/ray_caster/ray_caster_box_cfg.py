@@ -83,6 +83,18 @@ class RayCasterBoxCfg(SensorBaseCfg):
     对于3D盒采样，使用 :class:`BoxGridPatternCfg` 定义边界框尺寸和采样方向.
     """
 
+    ray_alignment: Literal["base", "yaw", "world"] = "base"
+    """指定射线投影到地面时所参考的坐标系。默认为 "base"。
+
+    可选模式如下：
+
+    * ``base``：射线的起始位置和方向跟随根物体的完整位置和姿态。
+    * ``yaw``：射线的起始位置和方向跟随根物体的位置以及姿态中的偏航分量。
+      这在进行高度图射线投射时非常有用。
+    * ``world``：射线的起始位置和方向始终保持固定。这在与机器人上的建图包结合使用，
+      或在全局坐标系中查询射线投射结果时非常有用。
+    """
+
     max_distance: float = 1e2
     """传感器投射射线的最大距离（米）. 默认为 1e6."""
 

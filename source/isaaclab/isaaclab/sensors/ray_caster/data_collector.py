@@ -8,9 +8,10 @@ try:
 except ImportError:
     OPEN3D_AVAILABLE = False
 
+import isaaclab.utils.math as math_utils
 
 class SimulationDataSaver:
-    def __init__(self, save_path_root, data_type, sub_dir_name, ignore_count: int=1, pose_mode='world'):
+    def __init__(self, save_path_root, data_type, sub_dir_name, pose_mode='world'):
         """
         初始化仿真数据保存类
         
@@ -30,7 +31,6 @@ class SimulationDataSaver:
         self.data_type = data_type
         self.sub_dir_name = sub_dir_name
         self.pose_mode = pose_mode
-        self.ign_cnt = ignore_count             # 一般取1，忽略场景初始化时首次reset导致的计数周期更新
         
         # 创建根目录
         os.makedirs(self.save_path_root, exist_ok=True)
@@ -41,7 +41,7 @@ class SimulationDataSaver:
         
         # 初始化计数器
         self.num_in = 0
-        self.T = 1  # 输入周期
+        self.T = 0  # 输入周期
         self.pose_data_dict = {}  # 用于存储位姿数据，key为环境编号，value为累积的位姿数据
         self.expected_num_envs = None  # 记录期望的环境数量
         
@@ -69,6 +69,8 @@ class SimulationDataSaver:
         - pcd: 需要两个参数 (point_cloud_tensor, mask_tensor)
         - npz: 需要两个参数 (pos_tensor, quat_tensor)
         """
+        if self.T < 1:
+            return
         if self.data_type == 'pcd':
             if len(args) != 2:
                 raise ValueError("For pcd type, save_data expects 2 arguments: (point_cloud_tensor, mask_tensor)")
@@ -149,31 +151,6 @@ class SimulationDataSaver:
             npy_filename = filename.replace('.pcd', '.npy')
             np.save(npy_filename, points)
 
-    def _quaternion_multiply(self, q1, q2):
-        """
-        使用PyTorch进行四元数乘法: q1*q2
-        q1, q2: [..., 4] 张量，格式为 [w, x, y, z]
-        """
-        # 将四元数分为标量部分和向量部分
-        w1, xyz1 = q1[..., :1], q1[..., 1:]
-        w2, xyz2 = q2[..., :1], q2[..., 1:]
-        
-        # 四元数乘法公式: (w1, v1) * (w2, v2) = (w1*w2 - dot(v1,v2), w1*v2 + w2*v1 + cross(v1,v2))
-        scalar_part = w1 * w2 - torch.sum(xyz1 * xyz2, dim=-1, keepdim=True)
-        vector_part = w1 * xyz2 + w2 * xyz1 + torch.cross(xyz1, xyz2, dim=-1)
-        
-        return torch.cat([scalar_part, vector_part], dim=-1)
-
-    def _quaternion_inverse(self, q):
-        """
-        使用PyTorch计算四元数的逆
-        q: [..., 4] 张量，格式为 [w, x, y, z]
-        """
-        # 四元数共轭除以其模长平方
-        q_conj = torch.cat([q[..., :1], -q[..., 1:]], dim=-1)  # [w, -x, -y, -z]
-        norm_sq = torch.sum(q * q, dim=-1, keepdim=True)
-        return q_conj / norm_sq
-
     def _calculate_frame_difference(self, current_pos, current_quat, prev_pos, prev_quat):
         """
         计算相对于上一帧的位姿差分
@@ -190,8 +167,8 @@ class SimulationDataSaver:
         """
         # 计算姿态差分
         # 姿态差分 = prev_quat^(-1) * current_quat
-        prev_quat_inv = self._quaternion_inverse(prev_quat)
-        diff_quat = self._quaternion_multiply(prev_quat_inv, current_quat)
+        prev_quat_inv = math_utils.quat_inv(prev_quat)  # 假设quat_inv也支持(w, x, y, z)
+        diff_quat = math_utils.quat_mul(prev_quat_inv, current_quat)  # 假设quat_mul也支持(w, x, y, z)
         
         # 计算位置差分
         # 位置差分 = R_prev^(-1) * (current_pos - prev_pos)
@@ -201,8 +178,8 @@ class SimulationDataSaver:
         pos_diff_quat = torch.cat([torch.zeros_like(pos_diff[..., :1]), pos_diff], dim=-1)
         
         # 旋转位置差: q_inv * pos_diff_quat * q
-        temp = self._quaternion_multiply(prev_quat_inv, pos_diff_quat)
-        rotated_pos_diff = self._quaternion_multiply(temp, prev_quat)
+        temp = math_utils.quat_mul(prev_quat_inv, pos_diff_quat)
+        rotated_pos_diff = math_utils.quat_mul(temp, prev_quat)
         
         # 提取旋转后的位置差 (虚部)
         diff_pos = rotated_pos_diff[..., 1:]
@@ -220,7 +197,7 @@ class SimulationDataSaver:
         
         Args:
             pos_tensor (torch.Tensor): 形状为 Nx3 的位置数据 (x, y, z)
-            quat_tensor (torch.Tensor): 形状为 Nx4 的姿态数据 (qx, qy, qz, qw)
+            quat_tensor (torch.Tensor): 形状为 Nx4 的姿态数据 (w, x, y, z)
         """
         if len(pos_tensor.shape) != 2 or pos_tensor.shape[1] != 3:
             raise ValueError(f"Position tensor shape should be Nx3, got {pos_tensor.shape}")
@@ -247,24 +224,21 @@ class SimulationDataSaver:
             env_pos = pos_tensor[i:i+1, :]  # 1x3 (保持torch tensor)
             env_quat = quat_tensor[i:i+1, :]  # 1x4 (保持torch tensor)
             
-            # 调整四元数格式从 [x, y, z, w] 到 [w, x, y, z]
-            env_quat = torch.cat([env_quat[:, 3:], env_quat[:, :3]], dim=1)  # [w, x, y, z]
+            env_key = (self.T - 1) * N + i + 1
             
             # 根据模式处理位姿数据
             if self.pose_mode == 'world':
-                # 世界坐标系：直接使用原始数据
-                processed_pos = env_pos.cpu().numpy()
-                processed_quat = env_quat.cpu().numpy()
+                # 直接保存绝对世界位姿（不使用差分）
+                # 这样保存的位姿与点云坐标系一致，便于恢复
+                processed_pos = env_pos.cpu().numpy()  # 1x3
+                processed_quat = env_quat.cpu().numpy()  # 1x4 (w, x, y, z)
             else:  # self.pose_mode == 'relative'
-                # 相对坐标系：计算相对于上一帧的位姿差分
-                env_key = (self.T - 1) * N + i + 1
-                
                 if env_key not in self.prev_poses:
                     # 首次记录，直接保存为初始位姿 (实际上应为单位姿态)
                     # 第一帧存储为零位姿
                     processed_pos = np.array([[0.0, 0.0, 0.0]])  # 1x3
                     processed_quat = np.array([[1.0, 0.0, 0.0, 0.0]])  # 1x4 (w, x, y, z)
-                    # 保存当前位姿作为下一帧的参考
+                    # 保存当前位姿作为下一帧的参考 (格式为 w, x, y, z)
                     self.prev_poses[env_key] = {
                         'pos': env_pos.clone(),
                         'quat': env_quat.clone()
@@ -282,7 +256,7 @@ class SimulationDataSaver:
                     processed_pos = diff_pos.reshape(1, -1)  # 1x3
                     processed_quat = diff_quat.reshape(1, -1)  # 1x4
                     
-                    # 更新上一帧位姿为当前位姿
+                    # 更新上一帧位姿为当前位姿 (格式为 w, x, y, z)
                     self.prev_poses[env_key]['pos'] = env_pos.clone()
                     self.prev_poses[env_key]['quat'] = env_quat.clone()
 
@@ -315,12 +289,9 @@ class SimulationDataSaver:
         """
         更新输入周期 T，并重置输入数量 num_in
         """
-        if self.ign_cnt > 0:
-            self.ign_cnt -= 1
-            return
         self.T += 1
         self.num_in = 0
-        
+
         if self.pose_mode == 'relative':
             self.prev_poses = {}
 
@@ -335,9 +306,10 @@ class SimulationDataSaver:
             'pose_mode': self.pose_mode
         }
 
-    def reset_prev_poses(self):
+    def reset_poses_baseline(self):
         """
         重置所有环境的上一帧位姿，主要用于相对坐标系模式
         """
         if self.pose_mode == 'relative':
             self.prev_poses = {}
+
