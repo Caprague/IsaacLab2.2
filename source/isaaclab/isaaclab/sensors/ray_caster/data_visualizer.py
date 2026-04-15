@@ -114,7 +114,7 @@ class DualPointCloudVisualizer:
         current_idx = start_idx
         is_first_frame = True
 
-        def update_single_window(vis, pcd_obj, file_list, idx):
+        def update_single_window(vis, pcd_obj, file_list, idx, color=[0.2, 0.8, 0.2]):
             if idx >= len(file_list):
                 return False
             
@@ -129,7 +129,7 @@ class DualPointCloudVisualizer:
 
                 if not self.check_normalization(loaded_pcd, file_path.name):
                     loaded_pcd = self.normalize_point_cloud(loaded_pcd)
-                loaded_pcd.paint_uniform_color([0.2, 0.8, 0.2])
+                loaded_pcd.paint_uniform_color(color)
                 loaded_pcd.estimate_normals()
 
                 pcd_obj.points = loaded_pcd.points
@@ -157,11 +157,11 @@ class DualPointCloudVisualizer:
             
             self.last_next_time = current_time  # 更新最后执行时间
             
-            update_single_window(vis1, pcd1, self.pcd_files_1, current_idx)
+            update_single_window(vis1, pcd1, self.pcd_files_1, current_idx, [0.2, 0.8, 0.2])
             
             if vis2 is not None:
                 if current_idx < len(self.pcd_files_2):
-                    update_single_window(vis2, pcd2, self.pcd_files_2, current_idx)
+                    update_single_window(vis2, pcd2, self.pcd_files_2, current_idx, [0.8, 0.2, 0.2])
             
             current_idx += 1
             is_first_frame = False

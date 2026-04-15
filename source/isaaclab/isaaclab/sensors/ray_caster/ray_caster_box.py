@@ -91,7 +91,7 @@ class RayCasterBox(SensorBase):
         # check the data collection mode flag
         if cfg.data_collection:
             assert cfg.data_save_path is not None, "Must set data_save_path while data_collection is True !!!"
-            self.data_saver = SimulationDataSaver(cfg.data_save_path, 'pcd', 'complete')
+            self.pc_data_saver = SimulationDataSaver(cfg.data_save_path, 'pcd', 'complete', ignore_count=1)
 
     def __str__(self) -> str:
         """Returns: A string containing information about the instance."""
@@ -148,7 +148,7 @@ class RayCasterBox(SensorBase):
         )
         # data collection mode
         if self.cfg.data_collection:
-            self.data_saver.update_period()
+            self.pc_data_saver.update_period()
 
     """
     Implementation
@@ -359,7 +359,7 @@ class RayCasterBox(SensorBase):
 
         # data collection mode
         if self.cfg.data_collection:
-            self.data_saver.save_data(self._data.ray_hits_b, self._data.ray_hits_mask)
+            self.pc_data_saver.save_data(self._data.ray_hits_b, self._data.ray_hits_mask)
 
     def _penetrate_and_collect(
         self,

@@ -83,7 +83,8 @@ class RayCasterLidar(SensorBase):
         # check the data collection mode flag
         if cfg.data_collection:
             assert cfg.data_save_path is not None, "Must set data_save_path while data_collection is True !!!"
-            self.data_saver = SimulationDataSaver(cfg.data_save_path, 'pcd', 'partial')
+            self.pc_data_saver = SimulationDataSaver(cfg.data_save_path, 'pcd', 'partial', ignore_count=1)
+            self.pose_data_saver = SimulationDataSaver(cfg.data_save_path, 'npz', 'transform', ignore_count=1, pose_mode="relative")
 
     def __str__(self) -> str:
         """Returns: A string containing information about the instance."""
@@ -136,7 +137,8 @@ class RayCasterLidar(SensorBase):
         )
         # data collection mode
         if self.cfg.data_collection:
-            self.data_saver.update_period()
+            self.pc_data_saver.update_period()
+            self.pose_data_saver.update_period()
         
     """
     Implementation.
@@ -381,7 +383,8 @@ class RayCasterLidar(SensorBase):
 
         # data collection mode
         if self.cfg.data_collection:
-            self.data_saver.save_data(self._data.ray_hits_b, self._data.ray_hits_mask)
+            self.pc_data_saver.save_data(self._data.ray_hits_b, self._data.ray_hits_mask)
+            self.pose_data_saver.save_data(self._data.pos_w, self._data.quat_w)
 
     def _set_debug_vis_impl(self, debug_vis: bool):
         # set visibility of markers
