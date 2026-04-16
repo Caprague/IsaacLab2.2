@@ -8,8 +8,6 @@ try:
 except ImportError:
     OPEN3D_AVAILABLE = False
 
-import isaaclab.utils.math as math_utils
-
 
 class SimulationDataSaver:
     def __init__(self, save_path_root, data_type, sub_dir_name, max_sequence=100, T_max=10):

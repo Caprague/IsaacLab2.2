@@ -390,7 +390,7 @@ class RayCasterBox(SensorBase):
 
         # data collection mode
         if self.cfg.data_collection:
-            self.pc_data_saver.save_data(env_ids, self._data.ray_hits_b, self._data.ray_hits_mask)
+            self.pc_data_saver.save_data(env_ids, self._data.ray_hits_b[env_ids], self._data.ray_hits_mask[env_ids])
 
     def _penetrate_and_collect(
         self,

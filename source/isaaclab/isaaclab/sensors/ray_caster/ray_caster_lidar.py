@@ -399,8 +399,8 @@ class RayCasterLidar(SensorBase):
 
         # data collection mode
         if self.cfg.data_collection:
-            self.pc_data_saver.save_data(env_ids, self._data.ray_hits_b, self._data.ray_hits_mask)
-            self.pose_data_saver.save_data(env_ids, self._data.sensor_pos_w, self._data.quat_w)
+            self.pc_data_saver.save_data(env_ids, self._data.ray_hits_b[env_ids], self._data.ray_hits_mask[env_ids])
+            self.pose_data_saver.save_data(env_ids, self._data.sensor_pos_w[env_ids], self._data.quat_w[env_ids])
 
     def _set_debug_vis_impl(self, debug_vis: bool):
         # set visibility of markers
