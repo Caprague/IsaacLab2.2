@@ -109,7 +109,6 @@ def transform_points(
     return points_batch
 
 
-
 def read_pcd(file_path):
     """读取pcd文件并打印点云信息"""
     if not os.path.exists(file_path):
@@ -130,6 +129,7 @@ def read_pcd(file_path):
         print(f"读取PCD文件时出错: {e}")
         return None
 
+
 def read_and_print_npz(file_path):
     """读取npz文件并打印内容"""
     if not os.path.exists(file_path):
@@ -149,6 +149,7 @@ def read_and_print_npz(file_path):
     except Exception as e:
         print(f"读取NPZ文件时出错: {e}")
         return None
+
 
 def create_coordinate_frame(size=1.0, origin=[0, 0, 0]):
     """创建一个坐标系框架可视化对象"""
@@ -249,6 +250,7 @@ class PointCloudProcessor:
             "outside_pcd": pcd_outside,
             "ref_pcd": pcd_ref
         }
+
 
 if __name__ == "__main__":
     # 设置文件路径（请根据实际情况修改）
