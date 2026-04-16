@@ -920,6 +920,48 @@ def _add_platform(height_field: np.ndarray, cfg: "hf_terrains_cfg.HfImageBasedTe
     return height_field
 
 
+def _remove_geometric_artifacts(height_field: np.ndarray, height_threshold: float = 0.5) -> np.ndarray:
+    """
+    精确移除由多图层叠加产生的“零厚度墙”和几何伪影。
+    使用8邻域逻辑进行扫描。
+    """
+    repaired_hf = height_field.copy()
+    rows, cols = height_field.shape
+    
+    # 定义8-邻域偏移量 (上, 下, 左, 右, 左上, 右上, 左下, 右下)
+    # 这样可以检测所有方向的连通性
+    neighbor_offsets = [
+        (-1, 0), (1, 0), (0, -1), (0, 1), # 4-邻域
+        (-1, -1), (-1, 1), (1, -1), (1, 1) # 对角线
+    ]
+    
+    for i in range(1, rows - 1):
+        for j in range(1, cols - 1):
+            center_val = height_field[i, j]
+            
+            # 1. 提取8-邻域的高度值
+            neighbor_vals = []
+            for di, dj in neighbor_offsets:
+                neighbor_vals.append(height_field[i + di, j + dj])
+            
+            neighbor_vals = np.array(neighbor_vals)
+            
+            # 2. 计算与8-邻域的最大高度差 (梯度检测)
+            # 使用8邻域能更敏锐地捕捉到对角线方向的突变
+            max_diff = np.max(np.abs(neighbor_vals - center_val))
+            
+            # 如果高度变化平缓，说明是平地或缓坡，直接跳过
+            if max_diff < height_threshold:
+                continue
+            
+            # 统计有多少个点与中心点高度相似
+            similar_count = np.sum(np.abs(neighbor_vals - center_val) < (height_threshold / 2))
+            if similar_count <= 2: 
+                repaired_hf[i, j] = np.mean(neighbor_vals)
+                
+    return repaired_hf
+
+
 @height_field_to_mesh_center
 def image_based_terrain(difficulty: float, cfg: "hf_terrains_cfg.HfImageBasedTerrainCfg") -> np.ndarray:
     """Generate a terrain based on image files.
@@ -962,11 +1004,14 @@ def image_based_terrain(difficulty: float, cfg: "hf_terrains_cfg.HfImageBasedTer
     # Add center platform if requested (operates on discretized heights)
     if cfg.platform_width > 0:
         height_field = _add_platform(height_field, cfg)
+        
+    # Remove thin "wall"
+    height_field = _remove_geometric_artifacts(height_field, height_threshold=0.1)
     
     # Apply terrain smoothing if requested (operates on discretized heights)
     if cfg.terrain_smoothing_sigma > 0:
         height_field = _smooth_layer(height_field, cfg.terrain_smoothing_sigma)
-    
+
     # Convert to discretized heights (divide by vertical_scale and round)
     height_field = np.rint(height_field / cfg.vertical_scale).astype(np.int16)
     

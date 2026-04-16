@@ -79,7 +79,7 @@ MULTI_LAYER_TERRAIN_CFG = TerrainGeneratorCfg(
             terrain_smoothing_sigma=0.0,
             resize_to_target=True,
             resize_interpolation="nearest",
-            save_resized_image=True,
+            save_resized_image=False,
         ),
     },
 )

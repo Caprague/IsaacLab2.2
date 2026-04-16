@@ -91,7 +91,12 @@ class RayCasterBox(SensorBase):
         # check the data collection mode flag
         if cfg.data_collection:
             assert cfg.data_save_path is not None, "Must set data_save_path while data_collection is True !!!"
-            self.pc_data_saver = SimulationDataSaver(cfg.data_save_path, 'pcd', 'complete')
+            self.pc_data_saver = SimulationDataSaver(
+                                    save_path_root=cfg.data_save_path,
+                                    data_type='pcd', 
+                                    sub_dir_name='complete',
+                                    max_sequence=100, 
+                                    T_max=20)
 
     def __str__(self) -> str:
         """Returns: A string containing information about the instance."""
@@ -118,7 +123,7 @@ class RayCasterBox(SensorBase):
         return self._view.count
 
     @property
-    def data(self) -> RayCasterData:
+    def data(self) -> RayCasterBoxData:
         # update sensors if needed
         self._update_outdated_buffers()
         # return the data
@@ -148,7 +153,7 @@ class RayCasterBox(SensorBase):
         )
         # data collection mode
         if self.cfg.data_collection:
-            self.pc_data_saver.update_period()
+            self.pc_data_saver.reset_input_counter(env_ids)
 
     """
     Implementation
@@ -184,6 +189,9 @@ class RayCasterBox(SensorBase):
         self._initialize_warp_meshes()
         # initialize the ray start and directions
         self._initialize_rays_impl()
+        
+        if self.cfg.data_collection:
+            self.pc_data_saver.set_num_envs(self._view.count)
 
     def _initialize_warp_meshes(self):
         # check number of mesh prims provided
@@ -274,6 +282,9 @@ class RayCasterBox(SensorBase):
         self._data.pos_w = torch.zeros(self._view.count, 3, device=self.device)
         self._data.quat_w = torch.zeros(self._view.count, 4, device=self.device)
         self._data.sensor_pos_w = torch.zeros(self._view.count, 3, device=self._device)
+        self._data.ray_hits_w = torch.zeros(self._view.count, self.num_rays * self.cfg.max_iterations, 3, device=self._device)
+        self._data.ray_hits_b = torch.zeros(self._view.count, self.num_rays * self.cfg.max_iterations, 3, device=self._device)
+        self._data.ray_hits_mask = torch.zeros(self._view.count, self.num_rays * self.cfg.max_iterations, dtype=torch.bool, device=self._device)
         
         if self.cfg.box_vis:
             self.box_points = torch.zeros_like(self.ray_starts, dtype=torch.float32, device=self.device)
@@ -330,21 +341,26 @@ class RayCasterBox(SensorBase):
         
         # perform multi-layer penetration ray casting with box-based distance limits
         ray_max_distances_w = self.ray_max_distances[env_ids].clone()
-        self._data.ray_hits_w, self._data.ray_hits_mask = self._penetrate_and_collect(
+        self._data.ray_hits_mask[env_ids] = False
+        self._data.ray_hits_w[env_ids] = 0.0
+        self._data.ray_hits_b[env_ids] = 0.0
+        points, mask = self._penetrate_and_collect(
             ray_starts_w, 
             ray_directions_w,
             ray_max_distances_w
         )
+        num_hits = points.shape[1]
+        self._data.ray_hits_w[env_ids, :num_hits] = points
+        self._data.ray_hits_mask[env_ids, :num_hits] = mask
         
         # 回归传感器本体坐标系（但采用水平基准）
         current_pos_w = self._data.pos_w[env_ids] # (N, 3) - 传感器在世界的位置
         current_quat_w = self._data.quat_w[env_ids] # (N, 4) - 传感器在世界的旋转 (wxyz)
         offset_pos = torch.tensor(list(self.cfg.offset.pos), device=self._device) # (3,)
-        offset_pos_w = quat_apply(current_quat_w, offset_pos.unsqueeze(0).expand(len(env_ids), -1)) # (N, 3)
+        offset_pos_w = quat_apply(current_quat_w, offset_pos.unsqueeze(0).repeat(len(env_ids), 1)) # (N, 3)
         # 逆平移（base + sensor）
-        self._data.sensor_pos_w[env_ids] = current_pos_w.unsqueeze(1) + offset_pos_w.unsqueeze(1)
-        local_hits = self._data.ray_hits_w[env_ids] - self._data.sensor_pos_w[env_ids] # (N, B, 3)
-        B = len(env_ids)
+        self._data.sensor_pos_w[env_ids] = current_pos_w + offset_pos_w
+        local_hits = points - self._data.sensor_pos_w[env_ids].unsqueeze(1).repeat(1, num_hits, 1) # (N, B, 3)
         
         if self.cfg.ray_alignment == "world":
             pass
@@ -356,10 +372,10 @@ class RayCasterBox(SensorBase):
                  torch.zeros_like(current_quat_w[:, 3])
             ], dim=-1)
             quat_yaw_inv = quat_yaw_inv / torch.linalg.norm(quat_yaw_inv, dim=-1, keepdim=True)
-            local_hits = quat_apply_yaw(quat_yaw_inv.repeat(1, B).view(-1, 4), local_hits.view(-1, 3)).view(local_hits.shape) # (N, B, 3)
+            local_hits = quat_apply_yaw(quat_yaw_inv.repeat(1, num_hits).view(-1, 4), local_hits.view(-1, 3)).view(local_hits.shape) # (N, B, 3)
         elif self.cfg.ray_alignment == "base":
             quat_inv = math_utils.quat_inv(current_quat_w) # (N, 4)
-            local_hits = quat_apply(quat_inv.repeat(1, B).view(-1, 4), local_hits.view(-1, 3)).view(local_hits.shape) # (N, B, 3)
+            local_hits = quat_apply(quat_inv.repeat(1, num_hits).view(-1, 4), local_hits.view(-1, 3)).view(local_hits.shape) # (N, B, 3)
         else:
             raise RuntimeError(f"Unsupported ray_alignment type: {self.cfg.ray_alignment}. Cannot transform to local frame.")
 
@@ -370,11 +386,11 @@ class RayCasterBox(SensorBase):
             normalized_local_hits = torch.clamp(local_hits / clip_bounds, -half_clip_bounds, half_clip_bounds)
             local_hits = normalized_local_hits
             
-        self._data.ray_hits_b = local_hits # Shape: (len(env_ids), B, 3)
+        self._data.ray_hits_b[env_ids, :num_hits] = local_hits  # Shape: (len(env_ids), B, 3)
 
         # data collection mode
         if self.cfg.data_collection:
-            self.pc_data_saver.save_data(self._data.ray_hits_b, self._data.ray_hits_mask)
+            self.pc_data_saver.save_data(env_ids, self._data.ray_hits_b, self._data.ray_hits_mask)
 
     def _penetrate_and_collect(
         self,
@@ -520,8 +536,9 @@ class RayCasterBox(SensorBase):
         # remove possible inf values
         hits_points = self._data.ray_hits_w[self._data.ray_hits_mask].view(-1, 3)
         hits_points = hits_points[~torch.any(torch.isinf(hits_points), dim=1)]
-        # show ray hit positions
-        self.hits_visualizer.visualize(hits_points)
+        if hits_points is not None and hits_points.shape[0] >= 1:
+            # show ray hit positions
+            self.hits_visualizer.visualize(hits_points)
         
         if self.cfg.box_vis:
             self.box_visualizer.visualize(self.box_points.view(-1, 3))

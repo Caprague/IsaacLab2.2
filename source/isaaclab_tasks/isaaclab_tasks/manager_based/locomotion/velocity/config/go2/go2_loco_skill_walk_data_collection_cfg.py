@@ -779,7 +779,7 @@ class Go2LocomotionSkillEnvCfg(ManagerBasedRLEnvCfg):
         """Post initialization."""
         # 场景仿真基本设定
         self.decimation = 4  # 场景仿真频率 = sim_dt/4 = 50 Hz
-        self.episode_length_s = 20.0  # 截断条件：时间 20s
+        self.episode_length_s = 20.5  # 截断条件：时间 s
 
         # 物理仿真基本设定
         self.sim.dt = 0.005  # 物理仿真频率 = 200 Hz
@@ -838,7 +838,7 @@ class Go2LocomotionSkillEnvCfg_Play(Go2LocomotionSkillEnvCfg):
         # 小规模播放
         self.scene.num_envs = 32
         self.scene.env_spacing = 2.5
-        self.episode_length_s = 20.0
+        self.episode_length_s = 20.5
 
         # # 限定速度指令
         # self.commands.base_velocity.rel_vel_world_envs = 1.0
