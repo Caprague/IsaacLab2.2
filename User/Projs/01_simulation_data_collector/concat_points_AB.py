@@ -254,17 +254,17 @@ class PointCloudProcessor:
 
 if __name__ == "__main__":
     # 设置文件路径（请根据实际情况修改）
-    TIME_IDX = 50
-    SUBDIR_IDX = 35
+    TIME_IDX = 3
+    SUBDIR_IDX = 5
     
     t1 = TIME_IDX
-    t2 = TIME_IDX + 20
-    pcd_file_t1 = f"/home/gms/Isaac/IsaacLab2.2/DataCollection/Meta/complete/%04d/%03d.pcd" % (SUBDIR_IDX, t1)
-    pcd_file_t2 = f"/home/gms/Isaac/IsaacLab2.2/DataCollection/Meta/complete/%04d/%03d.pcd" % (SUBDIR_IDX, t2)
-    npz_file = "/home/gms/Isaac/IsaacLab2.2/DataCollection/Meta/transform/%04d.npz" % SUBDIR_IDX
-    # pcd_file_t1 = f"/home/gms/Isaac/IsaacLab2.2/DataCollection/Meta/partial/%04d/%03d.pcd" % (SUBDIR_IDX, t1)
-    # pcd_file_t2 = f"/home/gms/Isaac/IsaacLab2.2/DataCollection/Meta/partial/%04d/%03d.pcd" % (SUBDIR_IDX, t2)
-    # npz_file = "/home/gms/Isaac/IsaacLab2.2/DataCollection/Meta/transform/%04d.npz" % SUBDIR_IDX
+    t2 = TIME_IDX + 1
+    pcd_file_t1 = f"/home/gms/DockerShare/DataCollection/Processed/walk_mix_strided15/train/complete/%04d/%03d.pcd" % (SUBDIR_IDX, t1)
+    pcd_file_t2 = f"/home/gms/DockerShare/DataCollection/Processed/walk_mix_strided15/train/complete/%04d/%03d.pcd" % (SUBDIR_IDX, t2)
+    npz_file = "/home/gms/DockerShare/DataCollection/Processed/walk_mix_strided15/train/transform/%04d.npz" % SUBDIR_IDX
+    pcd_file_t1 = f"/home/gms/DockerShare/DataCollection/Processed/walk_mix_strided15/train/partial/%04d/%03d.pcd" % (SUBDIR_IDX, t1)
+    pcd_file_t2 = f"/home/gms/DockerShare/DataCollection/Processed/walk_mix_strided15/train/partial/%04d/%03d.pcd" % (SUBDIR_IDX, t2)
+    npz_file = "/home/gms/DockerShare/DataCollection/Processed/walk_mix_strided15/train/transform/%04d.npz" % SUBDIR_IDX
     
     print("=" * 50)
     print("开始读取PCD和NPZ文件")
