@@ -25,7 +25,7 @@ import isaaclab.sim as sim_utils
 import isaaclab.utils.math as math_utils
 from isaaclab.markers import VisualizationMarkers
 from isaaclab.terrains.trimesh.utils import make_plane
-from isaaclab.utils.math import convert_quat, quat_apply, quat_apply_yaw
+from isaaclab.utils.math import convert_quat, quat_apply, quat_mul, quat_apply_yaw, yaw_quat
 from isaaclab.utils.warp import convert_to_warp_mesh, raycast_mesh
 
 from ..sensor_base import SensorBase
@@ -96,7 +96,7 @@ class RayCasterBox(SensorBase):
                                     data_type='pcd', 
                                     sub_dir_name='complete',
                                     max_sequence=100, 
-                                    T_max=10)
+                                    T_max=2)
 
     def __str__(self) -> str:
         """Returns: A string containing information about the instance."""
@@ -325,7 +325,7 @@ class RayCasterBox(SensorBase):
             # only yaw orientation is considered and directions are not rotated
             ray_starts_w = quat_apply_yaw(quat_w.repeat(1, self.num_rays), self.ray_starts[env_ids])
             ray_starts_w += pos_w.unsqueeze(1)
-            ray_directions_w = self.ray_directions[env_ids]
+            ray_directions_w = quat_apply_yaw(quat_w.repeat(1, self.num_rays), self.ray_directions[env_ids])
         elif self.cfg.ray_alignment == "base":
             # apply horizontal drift to ray starting position in ray caster frame
             pos_w[:, 0:2] += quat_apply(quat_w, self.ray_cast_drift[env_ids])[:, 0:2]
@@ -353,29 +353,33 @@ class RayCasterBox(SensorBase):
         self._data.ray_hits_w[env_ids, :num_hits] = points
         self._data.ray_hits_mask[env_ids, :num_hits] = mask
         
-        # 回归传感器本体坐标系（但采用水平基准）
-        current_pos_w = self._data.pos_w[env_ids] # (N, 3) - 传感器在世界的位置
-        current_quat_w = self._data.quat_w[env_ids] # (N, 4) - 传感器在世界的旋转 (wxyz)
+        current_pos_w = self._data.pos_w[env_ids] # (N, 3) - 机器人base在世界的位置
+        current_quat_w = self._data.quat_w[env_ids] # (N, 4) - 机器人base在世界的旋转 (wxyz)
         offset_pos = torch.tensor(list(self.cfg.offset.pos), device=self._device) # (3,)
+        offset_quat = torch.tensor(list(self.cfg.offset.rot), device=self._device) # (4,)
         offset_pos_w = quat_apply(current_quat_w, offset_pos.unsqueeze(0).repeat(len(env_ids), 1)) # (N, 3)
-        # 逆平移（base + sensor）
+        # 逆平移（base + sensor offset）
         self._data.sensor_pos_w[env_ids] = current_pos_w + offset_pos_w
+        # 计算传感器的世界姿态（base旋转 * offset旋转）
+        sensor_quat_w = math_utils.quat_mul(current_quat_w, offset_quat.unsqueeze(0).repeat(len(env_ids), 1)) # (N, 4)
         local_hits = points - self._data.sensor_pos_w[env_ids].unsqueeze(1).repeat(1, num_hits, 1) # (N, B, 3)
-        
+
         if self.cfg.ray_alignment == "world":
             pass
         elif self.cfg.ray_alignment == "yaw":
-            quat_yaw_inv = torch.stack([
-                current_quat_w[:, 0],
-                -current_quat_w[:, 1],
-                -current_quat_w[:, 2],
-                 torch.zeros_like(current_quat_w[:, 3])
-            ], dim=-1)
-            quat_yaw_inv = quat_yaw_inv / torch.linalg.norm(quat_yaw_inv, dim=-1, keepdim=True)
-            local_hits = quat_apply_yaw(quat_yaw_inv.repeat(1, num_hits).view(-1, 4), local_hits.view(-1, 3)).view(local_hits.shape) # (N, B, 3)
+            # 仅传感器世界姿态的yaw逆旋转，水平面与世界系对齐
+            sensor_yaw_quat_inv = math_utils.quat_inv(yaw_quat(sensor_quat_w))  # (N, 4)
+            local_hits = quat_apply(
+                sensor_yaw_quat_inv.repeat(1, num_hits).view(-1, 4),
+                local_hits.view(-1, 3)
+            ).view(local_hits.shape) # (N, B, 3)
         elif self.cfg.ray_alignment == "base":
-            quat_inv = math_utils.quat_inv(current_quat_w) # (N, 4)
-            local_hits = quat_apply(quat_inv.repeat(1, num_hits).view(-1, 4), local_hits.view(-1, 3)).view(local_hits.shape) # (N, B, 3)
+            # 传感器世界姿态的完整逆旋转 → 传感器本体坐标系
+            sensor_quat_inv = math_utils.quat_inv(sensor_quat_w)  # (N, 4) = R_B_S⁻¹ · R_W_B⁻¹
+            local_hits = quat_apply(
+                sensor_quat_inv.repeat(1, num_hits).view(-1, 4),
+                local_hits.view(-1, 3)
+            ).view(local_hits.shape) # (N, B, 3)
         else:
             raise RuntimeError(f"Unsupported ray_alignment type: {self.cfg.ray_alignment}. Cannot transform to local frame.")
 
@@ -442,7 +446,7 @@ class RayCasterBox(SensorBase):
             
             # Determine validity of hits
             is_hit = ~torch.any(torch.isinf(hits), dim=-1)
-            within_range = new_accumulated_distances <= (max_distances - epsilon)
+            within_range = new_accumulated_distances < max_distances
             valid_mask = ray_alive & is_hit & within_range
             
             # Collect valid hits per environment

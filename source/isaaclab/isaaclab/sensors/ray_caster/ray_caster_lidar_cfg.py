@@ -63,7 +63,7 @@ class RayCasterLidarCfg(SensorBaseCfg):
     * ``world``：射线的起始位置和方向始终保持固定。这在与机器人上的建图包结合使用，
       或在全局坐标系中查询射线投射结果时非常有用。
     """
-
+        
     pattern_cfg: PatternBaseCfg = MISSING
     """定义局部射线起始位置和方向的模式配置对象。"""
 
@@ -111,4 +111,13 @@ class RayCasterLidarCfg(SensorBaseCfg):
 
     data_save_path: str | None = None
     """数据保存路径。"""
-    
+
+    yaw_inv: bool = False
+    """是否将传感器的 yaw 角额外旋转 180°。默认为 False。
+
+    当雷达倒装（朝下扫描）时，传感器坐标系的前向轴与机器人本体前向轴相反，
+    导致逆变换后点云的 yaw 方向与直觉期望相反。启用此参数后，将在 yaw 逆旋转
+    之前额外叠加一个绕 Z 轴 180° 的修正旋转，使点云朝向恢复为机器人前向。
+
+    仅在 ``ray_alignment`` 为 ``"yaw"`` 时生效。
+    """

@@ -150,7 +150,8 @@ class MySceneCfg(InteractiveSceneCfg):
         prim_path="{ENV_REGEX_NS}/Robot/base",
         offset=RayCasterLidarCfg.OffsetCfg(pos=(0.28945, 0.0, -0.04682), rot=(0.13132, 0.0, 0.99134, 0.0)),
         max_distance=50.0,
-        ray_alignment="base",
+        ray_alignment="yaw",
+        yaw_inv=True,
         pattern_cfg=patterns.Mid360PatternCfg(csv_file_path="/home/gms/Isaac/IsaacLab2.2/IsaacLab/User/ScanCSV/Mid360/mid360.csv"),
         dynamic_pattern=True,
         debug_vis=True,
@@ -163,7 +164,7 @@ class MySceneCfg(InteractiveSceneCfg):
     gt_scanner = RayCasterBoxCfg(
         prim_path="{ENV_REGEX_NS}/Robot/base",
         offset=RayCasterBoxCfg.OffsetCfg(pos=(0.28945, 0.0, -0.04682)),
-        ray_alignment="base",
+        ray_alignment="yaw",
         pattern_cfg=patterns.BoxGridPatternCfg(
             resolution=0.025,
             size=(3.2, 3.2, 3.2),
