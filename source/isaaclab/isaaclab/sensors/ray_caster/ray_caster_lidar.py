@@ -88,13 +88,13 @@ class RayCasterLidar(SensorBase):
                                     data_type='pcd', 
                                     sub_dir_name='partial',
                                     max_sequence=100, 
-                                    T_max=20)
+                                    T_max=10)
             self.pose_data_saver = SimulationDataSaver(
                                     save_path_root=cfg.data_save_path,
                                     data_type='npz', 
                                     sub_dir_name='transform',
                                     max_sequence=100, 
-                                    T_max=20)
+                                    T_max=10)
 
     def __str__(self) -> str:
         """Returns: A string containing information about the instance."""

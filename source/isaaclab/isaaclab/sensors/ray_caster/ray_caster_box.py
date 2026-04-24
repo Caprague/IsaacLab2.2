@@ -96,7 +96,7 @@ class RayCasterBox(SensorBase):
                                     data_type='pcd', 
                                     sub_dir_name='complete',
                                     max_sequence=100, 
-                                    T_max=20)
+                                    T_max=10)
 
     def __str__(self) -> str:
         """Returns: A string containing information about the instance."""

@@ -138,6 +138,19 @@ gym.register(
 )
 
 # -------------------------------------------------------------------------------------------------------
+# Test Env
+gym.register(
+    id="Isaac-Go2-Test",
+    entry_point="isaaclab.envs:ManagerBasedRLEnv",
+    disable_env_checker=True,
+    kwargs={
+        "env_cfg_entry_point": f"{__name__}.go2_test:Go2LocomotionSkillEnvCfg_Play",
+        "rsl_rl_cfg_entry_point": f"{agents.__name__}.rsl_rl_ppo_cfg_walk:UnitreeGo2LocoSkillPPORunnerCfg",
+        "rsl_rl_distillation_cfg_entry_point": f"{agents.__name__}.rsl_rl_distillation_cfg_walk:UnitreeGo2LocoSkillDistillationRunnerCfg",
+    },
+)
+
+# -------------------------------------------------------------------------------------------------------
 # Zero Agent
 gym.register(
     id="Go2-Zero-Agent",
