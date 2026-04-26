@@ -93,10 +93,10 @@ class RayCasterBox(SensorBase):
             assert cfg.data_save_path is not None, "Must set data_save_path while data_collection is True !!!"
             self.pc_data_saver = SimulationDataSaver(
                                     save_path_root=cfg.data_save_path,
-                                    data_type='pcd', 
-                                    sub_dir_name='complete',
-                                    max_sequence=100, 
-                                    T_max=2)
+                                    data_type=cfg.pc_data_saver_cfg.data_type,
+                                    sub_dir_name=cfg.pc_data_saver_cfg.sub_dir_name,
+                                    max_sequence=cfg.pc_data_saver_cfg.max_sequence,
+                                    T_max=cfg.pc_data_saver_cfg.T_max)
 
     def __str__(self) -> str:
         """Returns: A string containing information about the instance."""

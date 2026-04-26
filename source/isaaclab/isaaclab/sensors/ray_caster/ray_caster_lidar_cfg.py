@@ -25,6 +25,19 @@ class RayCasterLidarCfg(SensorBaseCfg):
         rot: tuple[float, float, float, float] = (1.0, 0.0, 0.0, 0.0)
         """相对于父坐标系的四元数旋转 (w, x, y, z)。默认为 (1.0, 0.0, 0.0, 0.0)。"""
 
+    @configclass
+    class DataSaverCfg:
+        """数据采集保存器的配置参数。"""
+
+        data_type: str = "pcd"
+        """保存的数据格式类型。默认为 'pcd'。"""
+        sub_dir_name: str = "partial"
+        """保存数据的子目录名称。默认为 'partial'。"""
+        max_sequence: int = 100
+        """每个环境保存的最大序列数。默认为 100。"""
+        T_max: int = 2
+        """每个序列的最大时间步数。默认为 2。"""
+
     class_type: type = RayCasterLidar
     """对应的传感器类类型。"""
 
@@ -111,6 +124,12 @@ class RayCasterLidarCfg(SensorBaseCfg):
 
     data_save_path: str | None = None
     """数据保存路径。"""
+
+    pc_data_saver_cfg: DataSaverCfg = DataSaverCfg(data_type='pcd', sub_dir_name='partial', max_sequence=100, T_max=2)
+    """点云数据保存器配置。默认保存为 pcd 格式到 partial 子目录。"""
+
+    pose_data_saver_cfg: DataSaverCfg = DataSaverCfg(data_type='npz', sub_dir_name='transform', max_sequence=100, T_max=2)
+    """位姿数据保存器配置。默认保存为 npz 格式到 transform 子目录。"""
 
     yaw_inv: bool = False
     """是否将传感器的 yaw 角额外旋转 180°。默认为 False。
