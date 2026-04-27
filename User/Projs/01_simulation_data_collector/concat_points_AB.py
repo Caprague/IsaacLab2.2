@@ -5,6 +5,44 @@ import os
 
 
 @torch.jit.script
+def normalize(x: torch.Tensor, eps: float = 1e-9) -> torch.Tensor:
+    """Normalizes a given input tensor to unit length.
+
+    Args:
+        x: Input tensor of shape (N, dims).
+        eps: A small value to avoid division by zero. Defaults to 1e-9.
+
+    Returns:
+        Normalized tensor of shape (N, dims).
+    """
+    return x / x.norm(p=2, dim=-1).clamp(min=eps, max=None).unsqueeze(-1)
+
+
+@torch.jit.script
+def yaw_quat(quat: torch.Tensor) -> torch.Tensor:
+    """Extract the yaw component of a quaternion.
+
+    Args:
+        quat: The orientation in (w, x, y, z). Shape is (..., 4)
+
+    Returns:
+        A quaternion with only yaw component.
+    """
+    shape = quat.shape
+    quat_yaw = quat.view(-1, 4)
+    qw = quat_yaw[:, 0]
+    qx = quat_yaw[:, 1]
+    qy = quat_yaw[:, 2]
+    qz = quat_yaw[:, 3]
+    yaw = torch.atan2(2 * (qw * qz + qx * qy), 1 - 2 * (qy * qy + qz * qz))
+    quat_yaw = torch.zeros_like(quat_yaw)
+    quat_yaw[:, 3] = torch.sin(yaw / 2)
+    quat_yaw[:, 0] = torch.cos(yaw / 2)
+    quat_yaw = normalize(quat_yaw)
+    return quat_yaw.view(shape)
+
+
+@torch.jit.script
 def matrix_from_quat(quaternions: torch.Tensor) -> torch.Tensor:
     """Convert rotations given as quaternions to rotation matrices.
 
@@ -212,11 +250,13 @@ class PointCloudProcessor:
         tensor_t2, colors_t2, normals_t2 = self.pcd_to_tensor(pcd_t2)
 
         # 2. 计算 t2 的旋转矩阵 (用于逆变换)
-        rot_matrix_2 = matrix_from_quat(quat_t2)
+        quat_t1_yaw = yaw_quat(quat_t1.unsqueeze(0)).squeeze(0)
+        quat_t2_yaw = yaw_quat(quat_t2.unsqueeze(0)).squeeze(0)
+        rot_matrix_2 = matrix_from_quat(quat_t2_yaw)
 
         # 3. 变换到世界坐标系
-        points_world_t1 = transform_points(tensor_t1, pos_t1, quat_t1)
-        points_world_t2 = transform_points(tensor_t2, pos_t2, quat_t2)
+        points_world_t1 = transform_points(tensor_t1, pos_t1, quat_t1_yaw)
+        points_world_t2 = transform_points(tensor_t2, pos_t2, quat_t2_yaw)
 
         # 4. 变换到 t2 坐标系 (P_t2 = R_t2^T * (P_world - t_t2))
         points_world_t1_centered = points_world_t1 - pos_t2
@@ -254,17 +294,17 @@ class PointCloudProcessor:
 
 if __name__ == "__main__":
     # 设置文件路径（请根据实际情况修改）
-    TIME_IDX = 3
-    SUBDIR_IDX = 5
+    TIME_IDX = 30
+    SUBDIR_IDX = 1
     
     t1 = TIME_IDX
-    t2 = TIME_IDX + 1
-    pcd_file_t1 = f"/home/gms/DockerShare/DataCollection/Processed/walk_mix_strided15/train/complete/%04d/%03d.pcd" % (SUBDIR_IDX, t1)
-    pcd_file_t2 = f"/home/gms/DockerShare/DataCollection/Processed/walk_mix_strided15/train/complete/%04d/%03d.pcd" % (SUBDIR_IDX, t2)
-    npz_file = "/home/gms/DockerShare/DataCollection/Processed/walk_mix_strided15/train/transform/%04d.npz" % SUBDIR_IDX
-    pcd_file_t1 = f"/home/gms/DockerShare/DataCollection/Processed/walk_mix_strided15/train/partial/%04d/%03d.pcd" % (SUBDIR_IDX, t1)
-    pcd_file_t2 = f"/home/gms/DockerShare/DataCollection/Processed/walk_mix_strided15/train/partial/%04d/%03d.pcd" % (SUBDIR_IDX, t2)
-    npz_file = "/home/gms/DockerShare/DataCollection/Processed/walk_mix_strided15/train/transform/%04d.npz" % SUBDIR_IDX
+    t2 = TIME_IDX + 30
+    pcd_file_t1 = f"/home/gms/Isaac/IsaacLab2.2/DataCollection/Meta/walk_block/train/complete/%04d/%03d.pcd" % (SUBDIR_IDX, t1)
+    pcd_file_t2 = f"/home/gms/Isaac/IsaacLab2.2/DataCollection/Meta/walk_block/train/complete/%04d/%03d.pcd" % (SUBDIR_IDX, t2)
+    npz_file = "/home/gms/Isaac/IsaacLab2.2/DataCollection/Meta/walk_block/train/transform/%04d.npz" % SUBDIR_IDX
+    # pcd_file_t1 = f"/home/gms/Isaac/IsaacLab2.2/DataCollection/Meta/walk_block/train/partial/%04d/%03d.pcd" % (SUBDIR_IDX, t1)
+    # pcd_file_t2 = f"/home/gms/Isaac/IsaacLab2.2/DataCollection/Meta/walk_block/train/partial/%04d/%03d.pcd" % (SUBDIR_IDX, t2)
+    # npz_file = "/home/gms/Isaac/IsaacLab2.2/DataCollection/Meta/walk_block/train/transform/%04d.npz" % SUBDIR_IDX
     
     print("=" * 50)
     print("开始读取PCD和NPZ文件")
