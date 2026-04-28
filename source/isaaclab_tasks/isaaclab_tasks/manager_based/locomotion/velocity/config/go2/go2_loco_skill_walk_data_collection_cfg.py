@@ -53,9 +53,9 @@ class MySceneCfg(InteractiveSceneCfg):
         prim_path="/World/ground",
         terrain_type="generator",
         # terrain_generator=SKILL_WALK_PLUS_TERRAINS_S2_CFG,
-        # terrain_generator=MULTI_LAYER_TERRAIN_CFG,
+        terrain_generator=MULTI_LAYER_TERRAIN_CFG,
         # terrain_generator=IMAGE_STAIRS_TERRAIN_CFG,
-        terrain_generator=IMAGE_BLOCKS_TERRAIN_CFG,
+        # terrain_generator=IMAGE_BLOCKS_TERRAIN_CFG,
         max_init_terrain_level=5,
         collision_group=-1,
         physics_material=sim_utils.RigidBodyMaterialCfg(
@@ -159,9 +159,9 @@ class MySceneCfg(InteractiveSceneCfg):
         data_box_clip=(3.2, 3.2, 3.2),
         data_normalization=True,
         data_collection=True,
-        data_save_path="/home/gms/Isaac/IsaacLab2.2/DataCollection/Meta/walk_block/train",
-        pc_data_saver_cfg=RayCasterLidarCfg.DataSaverCfg(data_type='pcd', sub_dir_name='partial', max_sequence=100, T_max=5),
-        pose_data_saver_cfg=RayCasterLidarCfg.DataSaverCfg(data_type='npz', sub_dir_name='transform', max_sequence=100, T_max=5),
+        data_save_path="/home/gms/Isaac/IsaacLab2.2/DataCollection/Meta/walk_mix/train",
+        pc_data_saver_cfg=RayCasterLidarCfg.DataSaverCfg(data_type='pcd', sub_dir_name='partial', max_sequence=100, T_max=10),
+        pose_data_saver_cfg=RayCasterLidarCfg.DataSaverCfg(data_type='npz', sub_dir_name='transform', max_sequence=100, T_max=10),
     )
     gt_scanner = RayCasterBoxCfg(
         prim_path="{ENV_REGEX_NS}/Robot/base",
@@ -179,8 +179,8 @@ class MySceneCfg(InteractiveSceneCfg):
         mesh_prim_paths=["/World/ground"],
         data_normalization=True,
         data_collection=True,
-        data_save_path="/home/gms/Isaac/IsaacLab2.2/DataCollection/Meta/walk_block/train",
-        pc_data_saver_cfg=RayCasterBoxCfg.DataSaverCfg(data_type='pcd', sub_dir_name='complete', max_sequence=100, T_max=5),
+        data_save_path="/home/gms/Isaac/IsaacLab2.2/DataCollection/Meta/walk_mix/train",
+        pc_data_saver_cfg=RayCasterBoxCfg.DataSaverCfg(data_type='pcd', sub_dir_name='complete', max_sequence=100, T_max=10),
     )
     
     # 光源

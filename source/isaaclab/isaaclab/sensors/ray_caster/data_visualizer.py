@@ -171,10 +171,9 @@ class DualPointCloudVisualizer:
             is_first_frame = False
 
         def prev_callback(vis):
-            nonlocal current_idx, is_first_frame
-            current_idx -= 2
+            nonlocal current_idx
+            current_idx -= 1
             if current_idx < 0: current_idx = 0
-            is_first_frame = True
             next_callback(vis)
 
         def restart_callback(vis):
