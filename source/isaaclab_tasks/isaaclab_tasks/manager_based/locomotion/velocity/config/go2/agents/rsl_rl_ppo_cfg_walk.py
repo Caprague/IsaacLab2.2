@@ -13,8 +13,8 @@ from isaaclab_tasks.manager_based.locomotion.velocity.mdp.symmetry import go2_sk
 @configclass
 class UnitreeGo2LocoSkillPPORunnerCfg(RslRlOnPolicyRunnerCfg):
     num_steps_per_env = 32
-    # max_iterations = 4001   # teacher - stage1
-    max_iterations = 6001   # teacher - stage2
+    max_iterations = 4001   # teacher - stage1
+    # max_iterations = 6001   # teacher - stage2
     save_interval = 250
     experiment_name = "Go2-Loco-Skill-Walk"
     obs_groups = {
