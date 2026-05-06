@@ -794,14 +794,14 @@ class Go2LocomotionSkillEnvCfg_Play(Go2LocomotionSkillEnvCfg):
         self.scene.env_spacing = 2.5
         self.episode_length_s = 30.0
 
-        # # 限定速度指令
-        # self.commands.base_velocity.rel_vel_world_envs = 1.0
-        # self.commands.base_velocity.ranges.lin_vel_x = (0.8, 1.2)
-        # self.commands.base_velocity.ranges.lin_vel_y = (-0.5, 0.5)
+        # 限定速度指令
+        self.commands.base_velocity.rel_vel_world_envs = 1.0
+        self.commands.base_velocity.ranges.lin_vel_x = (0.8, 1.2)
+        self.commands.base_velocity.ranges.lin_vel_y = (-0.5, 0.5)
 
-        # Play 播放时，机器人生成位置随机化，不跟随地形等级
-        self.scene.terrain.max_init_terrain_level = None
-        self.scene.terrain.terrain_generator.curriculum = False
+        # # Play 播放时，机器人生成位置随机化，不跟随地形等级
+        # self.scene.terrain.max_init_terrain_level = None
+        # self.scene.terrain.terrain_generator.curriculum = False
 
         # 移除随机推力事件
         self.events.base_external_force_torque = None
