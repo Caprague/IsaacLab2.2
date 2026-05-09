@@ -587,7 +587,7 @@ class RewardsCfg:
     base_height_l2 = RewTerm(
         func=mdp.base_height_l2,
         weight=-10.0,
-        params={"target_height": 0.32, "sensor_cfg": SceneEntityCfg("base_height_scanner")},
+        params={"target_height": 0.3, "sensor_cfg": SceneEntityCfg("base_height_scanner")},
     )
     # 默认站立姿态 [姿态]
     default_stand_pos = RewTerm(
