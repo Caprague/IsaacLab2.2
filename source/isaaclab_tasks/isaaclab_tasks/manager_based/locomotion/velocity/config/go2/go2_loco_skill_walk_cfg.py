@@ -189,31 +189,31 @@ class MySceneCfg(InteractiveSceneCfg):
 class CommandsCfg:
     """Command specifications for the MDP."""
 
-    # stage1 enable ===================================================================================================
-    base_velocity = mdp.UniformVelocityCommandCfgUser(
-        asset_name="robot",
-        resampling_time_range=(10.0, 20.0),
-        rel_standing_envs=0.05,
-        rel_vel_world_envs=1.0,                 # must set to 1.0
-        heading_control_stiffness=0.5,
-        debug_vis=True,
-        ranges=mdp.UniformVelocityCommandCfgUser.Ranges(
-            lin_vel_x=(0.5, 1.0), lin_vel_y=(-0.3, 0.3), ang_vel_z=(-0.5, 0.5), heading=(-0.0, 0.0)
-        ),
-    )
-
-    # # stage2 enable ===================================================================================================
+    # # stage1 enable ===================================================================================================
     # base_velocity = mdp.UniformVelocityCommandCfgUser(
     #     asset_name="robot",
     #     resampling_time_range=(10.0, 20.0),
     #     rel_standing_envs=0.05,
-    #     rel_vel_world_envs=0.75,              # 0.75 : 0.25
+    #     rel_vel_world_envs=1.0,                 # must set to 1.0
     #     heading_control_stiffness=0.5,
     #     debug_vis=True,
     #     ranges=mdp.UniformVelocityCommandCfgUser.Ranges(
-    #         lin_vel_x=(-1.0, 1.0), lin_vel_y=(-1.0, 1.0), ang_vel_z=(-1.0, 1.0), heading=(-math.pi, math.pi)
+    #         lin_vel_x=(0.5, 1.0), lin_vel_y=(-0.3, 0.3), ang_vel_z=(-0.5, 0.5), heading=(-0.0, 0.0)
     #     ),
     # )
+
+    # stage2 enable ===================================================================================================
+    base_velocity = mdp.UniformVelocityCommandCfgUser(
+        asset_name="robot",
+        resampling_time_range=(10.0, 20.0),
+        rel_standing_envs=0.05,
+        rel_vel_world_envs=0.75,              # 0.75 : 0.25
+        heading_control_stiffness=0.5,
+        debug_vis=True,
+        ranges=mdp.UniformVelocityCommandCfgUser.Ranges(
+            lin_vel_x=(-1.0, 1.0), lin_vel_y=(-1.0, 1.0), ang_vel_z=(-1.0, 1.0), heading=(-math.pi, math.pi)
+        ),
+    )
 
 
 # ============================================================================================================
@@ -531,25 +531,25 @@ class EventCfg:
         },
     )
 
-    # interval
-    push_jump = EventTerm(                              # teacher - stage1 only
-        func=mdp.push_when_still_stucked_random,
-        mode="interval",
-        interval_range_s=(1.0, 2.0),
-        params={
-            "command_name": "base_velocity",
-            "vel_diff_threshold": 0.3,
-            "stucked_counter_cnt": 3,
-            "velocity_range": {
-                "x": (0.75, 1.5), 
-                "y": (0.0, 0.0), 
-                "z": (0.75, 1.5),
-                "roll": (0.0, 0.0), 
-                "pitch": (0.0, 0.0), 
-                "yaw":(0.0, 0.0), 
-            }
-        },
-    )
+    # # interval
+    # push_jump = EventTerm(                              # teacher - stage1 only
+    #     func=mdp.push_when_still_stucked_random,
+    #     mode="interval",
+    #     interval_range_s=(1.0, 2.0),
+    #     params={
+    #         "command_name": "base_velocity",
+    #         "vel_diff_threshold": 0.3,
+    #         "stucked_counter_cnt": 3,
+    #         "velocity_range": {
+    #             "x": (0.75, 1.5), 
+    #             "y": (0.0, 0.0), 
+    #             "z": (0.75, 1.5),
+    #             "roll": (0.0, 0.0), 
+    #             "pitch": (0.0, 0.0), 
+    #             "yaw":(0.0, 0.0), 
+    #         }
+    #     },
+    # )
 
 
 # ============================================================================================================
